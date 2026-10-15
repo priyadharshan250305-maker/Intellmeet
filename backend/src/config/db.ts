@@ -14,16 +14,27 @@ export const connectDatabase = async (): Promise<void> => {
     return connectionPromise;
   }
 
-  const mongoUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/intellmeet';
+  const isProduction = process.env.NODE_ENV === 'production';
+  const mongoUri = process.env.MONGODB_URI ||
+    (!isProduction ? 'mongodb://127.0.0.1:27017/intellmeet' : undefined);
+
+  if (!mongoUri) {
+    throw new Error('MONGODB_URI must be configured in production.');
+  }
+
   connectionPromise = (async () => {
     try {
       mongoose.set('strictQuery', false);
       await mongoose.connect(mongoUri, {
         serverSelectionTimeoutMS: 3000,
       });
-      console.log(`[Database] MongoDB connected successfully to: ${mongoUri}`);
-    } catch (error: any) {
-      console.warn(`[Database] Notice: Local MongoDB not connected at ${mongoUri}.`);
+      console.log('[Database] MongoDB connected successfully.');
+    } catch (error: unknown) {
+      console.warn('[Database] MongoDB connection failed.');
+
+      if (isProduction) {
+        throw error;
+      }
 
       try {
         console.log('[Database] Activating automatic in-memory Mongo server for development...');
@@ -35,9 +46,6 @@ export const connectDatabase = async (): Promise<void> => {
         console.log('[Database] User accounts, meetings, transcripts, and workspaces are fully operational!');
       } catch (memErr: any) {
         console.error('[Database] In-memory database fallback error:', memErr.message);
-        if (process.env.NODE_ENV === 'production') {
-          throw error;
-        }
       }
     }
   })();
