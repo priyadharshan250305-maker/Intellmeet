@@ -1,0 +1,28 @@
+{
+  "name": "intellmeet-monorepo",
+  "version": "1.0.0",
+  "description": "IntellMeet - AI-Powered Enterprise Meeting & Collaboration Platform",
+  "private": true,
+  "scripts": {
+    "install:all": "cmd /c \"cd backend && npm install\" && cmd /c \"cd frontend && npm install\"",
+    "dev": "npm run dev:frontend",
+    "dev:backend": "cmd /c \"cd backend && npm run dev\"",
+    "dev:frontend": "cmd /c \"cd frontend && npm run dev\"",
+    "build:backend": "cmd /c \"cd backend && npm run build\"",
+    "build:frontend": "cmd /c \"cd frontend && npm run build\"",
+    "build": "cmd /c \"npm run build:backend && npm run build:frontend\"",
+    "test:backend": "cmd /c \"cd backend && npm test\"",
+    "test": "npm run test:backend"
+  },
+  "keywords": [
+    "webrtc",
+    "video-conferencing",
+    "ai-summary",
+    "socketio",
+    "mongodb",
+    "react",
+    "express"
+  ],
+  "author": "IntellMeet Team",
+  "license": "ISC"
+}
