@@ -1,5 +1,5 @@
 import request from 'supertest';
-import { app } from '../index';
+import app from '../index';
 
 describe('Team Workspaces & RBAC API Endpoints', () => {
   let ownerToken: string;

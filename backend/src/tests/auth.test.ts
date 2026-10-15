@@ -1,5 +1,5 @@
 import request from 'supertest';
-import { app } from '../index';
+import app from '../index';
 import { User } from '../models/User';
 
 describe('Authentication API Endpoints', () => {

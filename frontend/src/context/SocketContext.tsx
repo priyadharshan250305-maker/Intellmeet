@@ -19,7 +19,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   useEffect(() => {
     const s = io(SOCKET_URL, {
-      transports: ['websocket', 'polling'],
+      transports: ['websocket'],
       reconnectionAttempts: 10,
       reconnectionDelay: 1000,
     });

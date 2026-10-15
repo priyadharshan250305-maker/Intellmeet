@@ -1,4 +1,4 @@
-import express, { Application, Request, Response } from 'express';
+import express, { Application, Request, Response, NextFunction } from 'express';
 import http from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import cors from 'cors';
@@ -11,7 +11,6 @@ import { errorHandler } from './middleware/errorHandler';
 import { apiLimiter } from './middleware/rateLimiter';
 import { setupSocketHandlers } from './socket/socketHandler';
 
-// Route imports
 import authRoutes from './routes/authRoutes';
 import userRoutes from './routes/userRoutes';
 import meetingRoutes from './routes/meetingRoutes';
@@ -23,19 +22,7 @@ import adminRoutes from './routes/adminRoutes';
 dotenv.config();
 
 const app: Application = express();
-const server = http.createServer(app);
 
-const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
-
-// Socket.IO setup with CORS
-const io = new SocketIOServer(server, {
-  cors: {
-    origin: '*',
-    methods: ['GET', 'POST'],
-  },
-});
-
-// Middleware
 app.use(
   helmet({
     contentSecurityPolicy: false,
@@ -55,11 +42,17 @@ if (process.env.NODE_ENV !== 'test') {
   app.use(morgan('dev'));
 }
 
-// Global API rate limiter
 app.use('/api', apiLimiter);
 
-// Health check endpoint
-app.get('/api/health', (req: Request, res: Response) => {
+app.get('/', (_req: Request, res: Response) => {
+  res.json({
+    status: 'healthy',
+    service: 'IntellMeet Backend API',
+    health: '/api/health',
+  });
+});
+
+app.get('/api/health', (_req: Request, res: Response) => {
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
@@ -68,26 +61,31 @@ app.get('/api/health', (req: Request, res: Response) => {
   });
 });
 
-// STUN/TURN configuration endpoint for WebRTC clients
-app.get('/api/webrtc/ice-servers', (req: Request, res: Response) => {
+app.get('/api/webrtc/ice-servers', (_req: Request, res: Response) => {
   const customStun = process.env.STUN_SERVERS
     ? process.env.STUN_SERVERS.split(',').map((url) => ({ urls: url.trim() }))
     : [];
 
-  const defaultServers = [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
-    ...customStun,
-  ];
-
   res.json({
-    iceServers: defaultServers,
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+      ...customStun,
+    ],
     turnNotice: 'For restrictive corporate firewalls or symmetric NATs, a relay TURN server (e.g. coturn or Twilio Network Traversal) should be configured in STUN_SERVERS / TURN_SERVERS.',
   });
 });
 
-// Mount Routes
+app.use('/api', async (_req: Request, _res: Response, next: NextFunction) => {
+  try {
+    await connectDatabase();
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/meetings', meetingRoutes);
@@ -96,29 +94,20 @@ app.use('/api/transcripts', transcriptRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/admin', adminRoutes);
 
-// Error Handler
 app.use(errorHandler);
 
-// Setup Socket.IO Signaling and Chat
+const server = http.createServer(app);
+const io = new SocketIOServer(server, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST'],
+  },
+});
+
+io.use((_socket, next) => {
+  connectDatabase().then(() => next()).catch(next);
+});
+
 setupSocketHandlers(io);
 
-const PORT = process.env.PORT || 5000;
-
-if (process.env.NODE_ENV !== 'test') {
-  connectDatabase()
-    .then(() => {
-      server.listen(PORT, () => {
-        console.log(`[Server] IntellMeet backend server running on port ${PORT}`);
-        console.log(`[Server] WebRTC Signaling & Socket.IO active`);
-      });
-    })
-    .catch((err) => {
-      console.error('[Server] Database startup error:', err);
-      // Still listen so frontend can communicate in development
-      server.listen(PORT, () => {
-        console.log(`[Server] Running on port ${PORT} (Database degraded mode)`);
-      });
-    });
-}
-
-export { app, server, io };
+export default server;
