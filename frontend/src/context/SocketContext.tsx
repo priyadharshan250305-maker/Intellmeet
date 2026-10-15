@@ -11,7 +11,9 @@ const SocketContext = createContext<SocketContextType>({
   isConnected: false,
 });
 
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || window.location.origin;
+const SOCKET_URL =
+  import.meta.env.VITE_SOCKET_URL ||
+  'https://intellmeet-git-main-priyadharshan250305-makers-projects.vercel.app';
 
 export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [socket, setSocket] = useState<Socket | null>(null);
