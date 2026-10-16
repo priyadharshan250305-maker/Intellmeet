@@ -12,7 +12,9 @@ const generateToken = (userId: string, role: string): string => {
 };
 
 export const register = async (req: Request, res: Response): Promise<void> => {
+  let registrationStage = 'request validation';
   try {
+    console.log('[Registration] step: request validation');
     const { name, email, password, title, department } = req.body;
 
     if (!name || !email || !password) {
@@ -20,13 +22,17 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    registrationStage = 'email lookup';
+    console.log(`[Registration] step: ${registrationStage}`);
     const existingUser = await User.findOne({ email: email.toLowerCase() });
     if (existingUser) {
       res.status(409).json({ success: false, message: 'User with this email already exists' });
       return;
     }
 
-    const newUser = await User.create({
+    registrationStage = 'user creation/save';
+    console.log(`[Registration] step: ${registrationStage}`);
+    const newUser = new User({
       name,
       email: email.toLowerCase(),
       password,
@@ -35,8 +41,15 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       department: department || 'General',
       avatar: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}`,
     });
+    newUser.$locals.registrationStageLogger = (stage: string): void => {
+      registrationStage = stage;
+      console.log(`[Registration] step: ${stage}`);
+    };
+    await newUser.save();
 
     // Create a default Personal Workspace for the new user
+    registrationStage = 'workspace creation';
+    console.log(`[Registration] step: ${registrationStage}`);
     const personalWorkspace = await Workspace.create({
       name: `${name}'s Workspace`,
       slug: `${email.split('@')[0]}-${Date.now().toString(36)}`,
@@ -44,6 +57,8 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       description: 'Default personal collaboration space',
     });
 
+    registrationStage = 'workspace membership creation';
+    console.log(`[Registration] step: ${registrationStage}`);
     await WorkspaceMembership.create({
       workspaceId: personalWorkspace._id,
       userId: newUser._id,
@@ -53,8 +68,12 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       invitedBy: newUser._id,
     });
 
+    registrationStage = 'JWT generation';
+    console.log(`[Registration] step: ${registrationStage}`);
     const token = generateToken(newUser._id.toString(), newUser.role);
 
+    registrationStage = 'final response';
+    console.log(`[Registration] step: ${registrationStage}`);
     res.status(201).json({
       success: true,
       message: 'Registration successful',
@@ -71,6 +90,13 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       workspaceId: personalWorkspace._id,
     });
   } catch (error: any) {
+    const errorMessage = String(error?.message || error)
+      .replace(/mongodb(?:\+srv)?:\/\/[^\s'"]+/gi, '[MongoDB URI redacted]')
+      .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[email redacted]')
+      .replace(/\b(password|secret|token|api[_ -]?key)\b\s*[:=]\s*[^,\s;]+/gi, '$1=[REDACTED]');
+    console.error(`[Registration] FAILED at: ${registrationStage}`);
+    console.error(`[Registration] Error name: ${error?.name || 'Error'}`);
+    console.error(`[Registration] Error message: ${errorMessage}`);
     res.status(500).json({ success: false, message: 'Registration failed', error: error.message });
   }
 };
