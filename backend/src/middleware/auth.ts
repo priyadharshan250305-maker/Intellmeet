@@ -8,6 +8,15 @@ export interface AuthRequest extends Request {
   userRole?: string;
 }
 
+export const getJwtSecret = (): string => {
+  const secret = process.env.JWT_SECRET;
+  if (secret) return secret;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('JWT_SECRET must be configured in production.');
+  }
+  return 'intellmeet_super_secure_jwt_dev_secret_key_987456!';
+};
+
 export const authenticate = async (
   req: AuthRequest,
   res: Response,
@@ -24,9 +33,7 @@ export const authenticate = async (
     }
 
     const token = authHeader.split(' ')[1];
-    const secret = process.env.JWT_SECRET || 'intellmeet_super_secure_jwt_dev_secret_key_987456!';
-
-    const decoded = jwt.verify(token, secret) as { id: string; role: string };
+    const decoded = jwt.verify(token, getJwtSecret()) as { id: string; role: string };
     
     // Attempt database user lookup if DB is active, or construct basic user object
     let user = null;
@@ -75,8 +82,7 @@ export const optionalAuth = async (
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.split(' ')[1];
-      const secret = process.env.JWT_SECRET || 'intellmeet_super_secure_jwt_dev_secret_key_987456!';
-      const decoded = jwt.verify(token, secret) as { id: string; role: string };
+      const decoded = jwt.verify(token, getJwtSecret()) as { id: string; role: string };
       req.userId = decoded.id;
       req.userRole = decoded.role;
       try {

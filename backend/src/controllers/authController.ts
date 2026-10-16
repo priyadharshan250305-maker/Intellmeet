@@ -4,17 +4,16 @@ import crypto from 'crypto';
 import { User } from '../models/User';
 import { Workspace } from '../models/Workspace';
 import { WorkspaceMembership } from '../models/WorkspaceMembership';
-import { AuthRequest } from '../middleware/auth';
+import { AuthRequest, getJwtSecret } from '../middleware/auth';
 
 const generateToken = (userId: string, role: string): string => {
-  const secret = process.env.JWT_SECRET || 'intellmeet_super_secure_jwt_dev_secret_key_987456!';
   const expiresIn = process.env.JWT_EXPIRES_IN || '7d';
-  return jwt.sign({ id: userId, role }, secret, { expiresIn: expiresIn as any });
+  return jwt.sign({ id: userId, role }, getJwtSecret(), { expiresIn: expiresIn as any });
 };
 
 export const register = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { name, email, password, role, title, department } = req.body;
+    const { name, email, password, title, department } = req.body;
 
     if (!name || !email || !password) {
       res.status(400).json({ success: false, message: 'Name, email, and password are required' });
@@ -31,7 +30,7 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       name,
       email: email.toLowerCase(),
       password,
-      role: role === 'admin' ? 'admin' : 'user',
+      role: 'user',
       title: title || 'Team Member',
       department: department || 'General',
       avatar: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}`,

@@ -1,17 +1,36 @@
 import request from 'supertest';
 import app from '../index';
+import { getJwtSecret } from '../middleware/auth';
 import { User } from '../models/User';
 
 describe('Authentication API Endpoints', () => {
+  it('should require JWT_SECRET in production', () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    const originalJwtSecret = process.env.JWT_SECRET;
+    process.env.NODE_ENV = 'production';
+    delete process.env.JWT_SECRET;
+
+    try {
+      expect(() => getJwtSecret()).toThrow('JWT_SECRET must be configured in production.');
+    } finally {
+      process.env.NODE_ENV = originalNodeEnv;
+      if (originalJwtSecret === undefined) delete process.env.JWT_SECRET;
+      else process.env.JWT_SECRET = originalJwtSecret;
+    }
+  });
+
   it('should register a new user successfully with hashed password and default workspace', async () => {
-    const res = await request(app).post('/api/auth/register').send({
-      name: 'John Enterprise',
-      email: 'john@intellmeet.com',
-      password: 'SecurePassword123!',
-      role: 'user',
-      title: 'Senior Architect',
-      department: 'Cloud Solutions',
-    });
+    const res = await request(app)
+      .post('/api/auth/register')
+      .set('X-Forwarded-For', '203.0.113.10')
+      .send({
+        name: 'John Enterprise',
+        email: 'john@intellmeet.com',
+        password: 'SecurePassword123!',
+        role: 'user',
+        title: 'Senior Architect',
+        department: 'Cloud Solutions',
+      });
 
     expect(res.status).toBe(201);
     expect(res.body.success).toBe(true);
@@ -23,6 +42,18 @@ describe('Authentication API Endpoints', () => {
     const userInDb = await User.findOne({ email: 'john@intellmeet.com' }).select('+password');
     expect(userInDb).not.toBeNull();
     expect(userInDb!.password).not.toBe('SecurePassword123!');
+  });
+
+  it('should not allow public registration to assign the admin role', async () => {
+    const res = await request(app).post('/api/auth/register').send({
+      name: 'Unprivileged Signup',
+      email: 'unprivileged@intellmeet.com',
+      password: 'SecurePassword123!',
+      role: 'admin',
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body.user.role).toBe('user');
   });
 
   it('should reject registration with duplicate email', async () => {
