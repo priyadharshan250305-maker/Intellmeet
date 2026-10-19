@@ -463,6 +463,7 @@ export const MeetingRoomPage: React.FC = () => {
             {/* Remote Peer Video Tiles */}
             {peers.map((peer) => {
               const peerReaction =
+                peer.reaction ||
                 participantReactions[peer.socketId] ||
                 (peer.userId ? participantReactions[peer.userId] : undefined) ||
                 (peer.name ? participantReactions[peer.name] : undefined);

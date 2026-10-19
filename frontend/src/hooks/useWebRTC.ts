@@ -596,6 +596,60 @@ export const useWebRTC = ({
       });
     };
 
+    // Participant Real-time Reaction Updates
+    const handleRemoteReaction = (data: {
+      socketId?: string;
+      participantId?: string;
+      userId?: string;
+      reaction?: string;
+      emoji?: string;
+    }) => {
+      const emoji = data?.reaction || data?.emoji || (typeof data === 'string' ? data : '');
+      const targetId = data?.socketId || (data?.participantId !== 'local' ? data?.participantId : undefined);
+      if (!emoji) return;
+
+      setPeers((prev) => {
+        const next = new Map(prev);
+        let updated = false;
+
+        // Try direct socketId match
+        if (targetId && next.has(targetId)) {
+          const p = next.get(targetId)!;
+          next.set(targetId, { ...p, reaction: emoji });
+          updated = true;
+        } else {
+          // Fallback by userId or single remote peer
+          for (const [sId, p] of next.entries()) {
+            if (
+              (data?.userId && p.userId === data.userId) ||
+              (targetId && p.userId === targetId) ||
+              next.size === 1
+            ) {
+              next.set(sId, { ...p, reaction: emoji });
+              updated = true;
+            }
+          }
+        }
+
+        if (updated) {
+          // Auto clear reaction badge after 2.8s
+          setTimeout(() => {
+            setPeers((curr) => {
+              const cleaned = new Map(curr);
+              for (const [sId, p] of cleaned.entries()) {
+                if (p.reaction === emoji) {
+                  cleaned.set(sId, { ...p, reaction: undefined });
+                }
+              }
+              return cleaned;
+            });
+          }, 2800);
+        }
+
+        return next;
+      });
+    };
+
     socket.on('existing-participants', handleExistingParticipants);
     socket.on('user-joined', handleUserJoined);
     socket.on('signal-offer', handleSignalOffer);
@@ -605,6 +659,8 @@ export const useWebRTC = ({
     socket.on('user-toggle-video', handleUserToggleVideo);
     socket.on('user-toggle-screenshare', handleUserToggleScreenshare);
     socket.on('user-raise-hand', handleUserRaiseHand);
+    socket.on('reaction', handleRemoteReaction);
+    socket.on('meeting:reaction', handleRemoteReaction);
     socket.on('user-left', handleUserLeft);
 
     return () => {
@@ -620,6 +676,8 @@ export const useWebRTC = ({
       socket.off('user-toggle-video', handleUserToggleVideo);
       socket.off('user-toggle-screenshare', handleUserToggleScreenshare);
       socket.off('user-raise-hand', handleUserRaiseHand);
+      socket.off('reaction', handleRemoteReaction);
+      socket.off('meeting:reaction', handleRemoteReaction);
       socket.off('user-left', handleUserLeft);
       socket.off('connect', handleSocketConnect);
       socket.off('disconnect', handleSocketDisconnect);

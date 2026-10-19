@@ -133,7 +133,7 @@ export const setupSocketHandlers = (io: SocketIOServer): void => {
     });
 
     // In-meeting Real-time Reactions
-    const handleMeetingReaction = (data: {
+    const handleMeetingReaction = async (data: {
       id?: string;
       roomId?: string;
       participantId?: string;
@@ -162,7 +162,7 @@ export const setupSocketHandlers = (io: SocketIOServer): void => {
       const payload = {
         id: data?.id || `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         roomId: targetRoom,
-        participantId,
+        participantId: socket.id || participantId,
         reaction,
         emoji: reaction,
         senderName,
@@ -173,7 +173,7 @@ export const setupSocketHandlers = (io: SocketIOServer): void => {
 
       // Ensure socket is in targetRoom so socket membership is always guaranteed
       if (!socket.rooms.has(targetRoom)) {
-        socket.join(targetRoom);
+        await socket.join(targetRoom);
       }
 
       // Broadcast to everyone ELSE in the same room (room-scoped, no sender echo)

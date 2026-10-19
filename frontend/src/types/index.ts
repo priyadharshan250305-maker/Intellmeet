@@ -68,6 +68,7 @@ export interface PeerState {
   isSharingScreen: boolean;
   isHandRaised: boolean;
   stream?: MediaStream;
+  reaction?: string;
 }
 
 export interface ChatMessage {
