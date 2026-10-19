@@ -138,6 +138,7 @@ export const setupSocketHandlers = (io: SocketIOServer): void => {
       roomId?: string;
       participantId?: string;
       socketId?: string;
+      userId?: string;
       reaction?: string;
       emoji?: string;
       senderName?: string;
@@ -166,6 +167,7 @@ export const setupSocketHandlers = (io: SocketIOServer): void => {
         emoji: reaction,
         senderName,
         socketId: socket.id,
+        userId: data?.userId || (socket.data.peerInfo as PeerInfo)?.userId,
         timestamp: Date.now(),
       };
 
@@ -174,13 +176,19 @@ export const setupSocketHandlers = (io: SocketIOServer): void => {
         socket.join(targetRoom);
       }
 
-      // Broadcast to other participants in the same meeting room
-      socket.to(targetRoom).emit('meeting:reaction', payload);
+      // Broadcast to everyone ELSE in the same room (room-scoped, no sender echo)
       socket.to(targetRoom).emit('reaction', payload);
+      socket.to(targetRoom).emit('meeting:reaction', payload);
+
+      // If socket joined under a different roomId alias, broadcast to it as well
+      if (socket.data.roomId && socket.data.roomId !== targetRoom) {
+        socket.to(socket.data.roomId).emit('reaction', payload);
+        socket.to(socket.data.roomId).emit('meeting:reaction', payload);
+      }
     };
 
-    socket.on('meeting:reaction', handleMeetingReaction);
     socket.on('reaction', handleMeetingReaction);
+    socket.on('meeting:reaction', handleMeetingReaction);
     socket.on('send-reaction', handleMeetingReaction);
 
     // In-meeting Chat

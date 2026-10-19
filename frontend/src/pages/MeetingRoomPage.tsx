@@ -62,6 +62,8 @@ export const MeetingRoomPage: React.FC = () => {
   const seenReactionIds = useRef<Set<string>>(new Set());
 
   const showParticipantReaction = useCallback((participantId: string, reactionEmoji: string) => {
+    if (!participantId) return;
+
     setParticipantReactions((prev) => ({
       ...prev,
       [participantId]: reactionEmoji,
@@ -107,30 +109,36 @@ export const MeetingRoomPage: React.FC = () => {
         seenReactionIds.current.add(data.id);
         setTimeout(() => {
           seenReactionIds.current.delete(data.id);
-        }, 5000);
+        }, 4000);
       }
 
       const reactionEmoji =
         typeof data === 'string' ? data : (data?.reaction || data?.emoji);
       if (!reactionEmoji) return;
 
-      const senderId =
+      const senderParticipantId =
         typeof data === 'object'
           ? (data?.participantId || data?.socketId)
           : undefined;
-      const socketId = typeof data === 'object' ? data?.socketId : undefined;
+      const senderSocketId = typeof data === 'object' ? data?.socketId : undefined;
+      const senderUserId = typeof data === 'object' ? data?.userId : undefined;
+      const senderName = typeof data === 'object' ? data?.senderName : undefined;
 
       // Ignore echo from self if received
-      if (socket.id && (socketId === socket.id || senderId === socket.id)) return;
-
-      const senderName = typeof data === 'object' ? data?.senderName : undefined;
+      if (
+        socket.id &&
+        (senderSocketId === socket.id || senderParticipantId === socket.id)
+      ) {
+        return;
+      }
 
       // 1. Display reaction badge on the remote participant's video tile
       const currentPeers = peersRef.current;
       const matchedPeer = currentPeers.find(
         (p) =>
-          (socketId && p.socketId === socketId) ||
-          (senderId && (p.socketId === senderId || p.userId === senderId)) ||
+          (senderSocketId && p.socketId === senderSocketId) ||
+          (senderParticipantId && (p.socketId === senderParticipantId || p.userId === senderParticipantId)) ||
+          (senderUserId && p.userId === senderUserId) ||
           (senderName && p.name && p.name.trim().toLowerCase() === senderName.trim().toLowerCase())
       );
 
@@ -139,27 +147,31 @@ export const MeetingRoomPage: React.FC = () => {
         if (matchedPeer.userId) {
           showParticipantReaction(matchedPeer.userId, reactionEmoji);
         }
-      } else if (senderId) {
-        showParticipantReaction(senderId, reactionEmoji);
+        if (matchedPeer.name) {
+          showParticipantReaction(matchedPeer.name, reactionEmoji);
+        }
+      } else {
+        if (senderSocketId) showParticipantReaction(senderSocketId, reactionEmoji);
+        if (senderParticipantId) showParticipantReaction(senderParticipantId, reactionEmoji);
+        if (senderUserId) showParticipantReaction(senderUserId, reactionEmoji);
+        if (senderName) showParticipantReaction(senderName, reactionEmoji);
       }
 
-      // In 1-on-1 calls (1 remote peer), guarantee it shows on the other participant's tile
+      // Guarantee badge displays on the remote participant's tile in 1-on-1 calls
       if (currentPeers.length === 1) {
         showParticipantReaction(currentPeers[0].socketId, reactionEmoji);
       }
 
-      // 2. Also trigger floating reaction overlay
+      // 2. Also trigger floating reaction overlay on receiver screen
       addFloatingReaction(reactionEmoji, senderName);
     };
 
-    socket.on('meeting:reaction', handleRemoteReaction);
     socket.on('reaction', handleRemoteReaction);
-    socket.on('reaction-received', handleRemoteReaction);
+    socket.on('meeting:reaction', handleRemoteReaction);
 
     return () => {
-      socket.off('meeting:reaction', handleRemoteReaction);
       socket.off('reaction', handleRemoteReaction);
-      socket.off('reaction-received', handleRemoteReaction);
+      socket.off('meeting:reaction', handleRemoteReaction);
     };
   }, [socket, addFloatingReaction, showParticipantReaction]);
 
@@ -173,19 +185,20 @@ export const MeetingRoomPage: React.FC = () => {
       }
 
       // 2. Broadcast to other participants in the same meeting room
-      const targetRoomId = (roomId || (meeting as any)?.roomId)?.trim();
+      const targetRoomId = (roomId || meeting?.roomId || (meeting as any)?._id)?.trim();
       if (socket && targetRoomId) {
         const payload = {
           id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           roomId: targetRoomId,
           participantId: socket.id || user?.id || 'local',
           socketId: socket.id,
+          userId: user?.id,
           reaction: emoji,
           emoji,
           senderName: participantInfo.name,
         };
-        socket.emit('meeting:reaction', payload);
         socket.emit('reaction', payload);
+        socket.emit('meeting:reaction', payload);
       }
     },
     [socket, roomId, meeting, participantInfo.name, user?.id, addFloatingReaction, showParticipantReaction]
