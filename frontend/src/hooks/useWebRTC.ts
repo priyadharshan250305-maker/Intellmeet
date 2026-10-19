@@ -603,10 +603,17 @@ export const useWebRTC = ({
       userId?: string;
       reaction?: string;
       emoji?: string;
+      senderName?: string;
     }) => {
+      console.info('[WebRTC] Received remote reaction in useWebRTC:', data);
       const emoji = data?.reaction || data?.emoji || (typeof data === 'string' ? data : '');
       const targetId = data?.socketId || (data?.participantId !== 'local' ? data?.participantId : undefined);
       if (!emoji) return;
+
+      // Ignore self-echo
+      if (socket.id && (targetId === socket.id || data?.socketId === socket.id)) {
+        return;
+      }
 
       setPeers((prev) => {
         const next = new Map(prev);
@@ -618,7 +625,7 @@ export const useWebRTC = ({
           next.set(targetId, { ...p, reaction: emoji });
           updated = true;
         } else {
-          // Fallback by userId or single remote peer
+          // Fallback by userId or single remote peer in 1-on-1 calls
           for (const [sId, p] of next.entries()) {
             if (
               (data?.userId && p.userId === data.userId) ||

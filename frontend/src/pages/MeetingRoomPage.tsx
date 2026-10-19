@@ -104,6 +104,8 @@ export const MeetingRoomPage: React.FC = () => {
     if (!socket) return;
 
     const handleRemoteReaction = (data: any) => {
+      console.info('[Reaction] Received remote reaction in MeetingRoomPage:', data);
+
       if (typeof data === 'object' && data?.id) {
         if (seenReactionIds.current.has(data.id)) return;
         seenReactionIds.current.add(data.id);
@@ -185,8 +187,9 @@ export const MeetingRoomPage: React.FC = () => {
       }
 
       // 2. Broadcast to other participants in the same meeting room
-      const targetRoomId = (roomId || meeting?.roomId || (meeting as any)?._id)?.trim();
+      const targetRoomId = (roomId || meeting?.roomId || (meeting as any)?._id || '')?.trim();
       if (socket && targetRoomId) {
+        console.info('[Reaction] Emitting reaction:', { emoji, targetRoomId, socketId: socket.id, socketConnected: socket.connected });
         const payload = {
           id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           roomId: targetRoomId,
@@ -199,6 +202,11 @@ export const MeetingRoomPage: React.FC = () => {
         };
         socket.emit('reaction', payload);
         socket.emit('meeting:reaction', payload);
+      } else {
+        console.warn('[Reaction] Cannot emit reaction: socket or targetRoomId missing', {
+          hasSocket: Boolean(socket),
+          targetRoomId,
+        });
       }
     },
     [socket, roomId, meeting, participantInfo.name, user?.id, addFloatingReaction, showParticipantReaction]
