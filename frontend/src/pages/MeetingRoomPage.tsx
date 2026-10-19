@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { useWebRTC } from '../hooks/useWebRTC';
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
 import { meetingService } from '../services';
-import { Meeting } from '../types';
+import { Meeting, PeerState } from '../types';
 import { VideoTile } from '../components/VideoTile';
 import { MeetingControls } from '../components/MeetingControls';
 import { ChatDrawer } from '../components/ChatDrawer';
@@ -58,6 +58,7 @@ export const MeetingRoomPage: React.FC = () => {
   const [reactions, setReactions] = useState<FloatingReaction[]>([]);
   // Tile reactions mapped by participant/socket ID: { [participantId: string]: string }
   const [participantReactions, setParticipantReactions] = useState<{ [id: string]: string }>({});
+  const peersRef = useRef<PeerState[]>([]);
 
   const showParticipantReaction = useCallback((participantId: string, reactionEmoji: string) => {
     setParticipantReactions((prev) => ({
@@ -115,8 +116,17 @@ export const MeetingRoomPage: React.FC = () => {
       const senderName = typeof data === 'object' ? data?.senderName : undefined;
 
       // 1. Display reaction badge on the remote participant's video tile
-      if (senderId) {
+      const currentPeers = peersRef.current;
+      const matchedPeer = currentPeers.find(
+        (p) => (senderId && p.socketId === senderId) || (senderId && p.userId === senderId)
+      );
+
+      if (matchedPeer) {
+        showParticipantReaction(matchedPeer.socketId, reactionEmoji);
+      } else if (senderId) {
         showParticipantReaction(senderId, reactionEmoji);
+      } else if (currentPeers.length === 1) {
+        showParticipantReaction(currentPeers[0].socketId, reactionEmoji);
       }
 
       // 2. Also trigger floating reaction overlay
@@ -152,7 +162,6 @@ export const MeetingRoomPage: React.FC = () => {
           senderName: participantInfo.name,
         };
         socket.emit('meeting:reaction', payload);
-        socket.emit('reaction', payload);
       }
     },
     [socket, roomId, meeting, participantInfo.name, user?.id, addFloatingReaction, showParticipantReaction]
@@ -218,6 +227,8 @@ export const MeetingRoomPage: React.FC = () => {
     initialMuted: meeting?.settings?.audioMutedOnEntry || false,
     initialVideoOff: meeting?.settings?.videoOffOnEntry || false,
   });
+
+  peersRef.current = peers;
 
   // Speech Recognition & Live AI Transcription Hook
   const {

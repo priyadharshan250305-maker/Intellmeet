@@ -146,9 +146,10 @@ export const setupSocketHandlers = (io: SocketIOServer): void => {
         : socket.data.roomId;
       if (!targetRoom || !reaction) return;
 
-      const participantId = (typeof data === 'object' && data?.participantId)
-        ? data.participantId
-        : socket.id;
+      const participantId =
+        (typeof data === 'object' && data?.participantId && data.participantId !== 'local')
+          ? data.participantId
+          : socket.id;
 
       const senderName =
         (typeof data === 'object' && data?.senderName?.trim()) ||
@@ -165,6 +166,11 @@ export const setupSocketHandlers = (io: SocketIOServer): void => {
         socketId: socket.id,
         timestamp: Date.now(),
       };
+
+      // Ensure socket is in targetRoom so socket membership is always guaranteed
+      if (!socket.rooms.has(targetRoom)) {
+        socket.join(targetRoom);
+      }
 
       // Broadcast to other participants in the same meeting room
       socket.to(targetRoom).emit('meeting:reaction', payload);
