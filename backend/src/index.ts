@@ -1,6 +1,8 @@
 import express, { Application, Request, Response, NextFunction } from 'express';
 import http from 'http';
 import { Server as SocketIOServer } from 'socket.io';
+import { createAdapter } from '@socket.io/redis-adapter';
+import { createClient } from 'redis';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
@@ -105,8 +107,33 @@ const io = new SocketIOServer(server, {
   },
 });
 
-io.use((_socket, next) => {
-  connectDatabase().then(() => next()).catch(next);
+let redisAdapterReady: Promise<void> | null = null;
+if (process.env.REDIS_URL) {
+  const pubClient = createClient({ url: process.env.REDIS_URL });
+  const subClient = pubClient.duplicate();
+
+  redisAdapterReady = Promise.all([pubClient.connect(), subClient.connect()]).then(() => {
+    io.adapter(createAdapter(pubClient, subClient));
+    console.log('[Socket] Redis adapter connected; cross-instance rooms enabled.');
+  });
+  redisAdapterReady.catch((error) => {
+    console.error('[Socket] Redis adapter connection failed:', error);
+  });
+} else if (process.env.NODE_ENV === 'production') {
+  console.error('[Socket] REDIS_URL is required in production for shared participant rooms.');
+}
+
+io.use(async (_socket, next) => {
+  try {
+    if (process.env.NODE_ENV === 'production' && !redisAdapterReady) {
+      throw new Error('REDIS_URL is required for production Socket.IO signaling.');
+    }
+    if (redisAdapterReady) await redisAdapterReady;
+    await connectDatabase();
+    next();
+  } catch (error) {
+    next(error as Error);
+  }
 });
 
 setupSocketHandlers(io);

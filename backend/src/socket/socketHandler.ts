@@ -16,9 +16,6 @@ interface PeerInfo {
   joinedAt: Date;
 }
 
-// In-memory room tracking for real-time presence: roomId -> Map<socketId, PeerInfo>
-const rooms = new Map<string, Map<string, PeerInfo>>();
-
 export const setupSocketHandlers = (io: SocketIOServer): void => {
   io.on('connection', (socket: Socket) => {
     console.log(`[Socket] Client connected: ${socket.id}`);
@@ -34,13 +31,7 @@ export const setupSocketHandlers = (io: SocketIOServer): void => {
         const { roomId, user, isMuted = false, isVideoOff = false } = data;
         if (!roomId) return;
 
-        socket.join(roomId);
-
-        if (!rooms.has(roomId)) {
-          rooms.set(roomId, new Map());
-        }
-
-        const roomPeers = rooms.get(roomId)!;
+        await socket.join(roomId);
         const peerInfo: PeerInfo = {
           socketId: socket.id,
           userId: user?.id,
@@ -53,18 +44,20 @@ export const setupSocketHandlers = (io: SocketIOServer): void => {
           isHandRaised: false,
           joinedAt: new Date(),
         };
+        socket.data.peerInfo = peerInfo;
+        socket.data.roomId = roomId;
 
-        // Send existing participants in the room to the joining client
-        const existingParticipants = Array.from(roomPeers.values());
+        // Adapter-backed room enumeration includes sockets on other instances.
+        const roomSockets = await io.in(roomId).fetchSockets();
+        const existingParticipants = roomSockets
+          .filter((peerSocket) => peerSocket.id !== socket.id && peerSocket.data.peerInfo)
+          .map((peerSocket) => peerSocket.data.peerInfo as PeerInfo);
         socket.emit('existing-participants', existingParticipants);
-
-        // Add current peer to the room
-        roomPeers.set(socket.id, peerInfo);
 
         // Broadcast to all other participants that a new peer joined
         socket.to(roomId).emit('user-joined', peerInfo);
 
-        console.log(`[Socket] ${peerInfo.name} (${socket.id}) joined room: ${roomId}. Total: ${roomPeers.size}`);
+        console.log(`[Socket] ${peerInfo.name} (${socket.id}) joined room: ${roomId}. Total: ${roomSockets.length}`);
       } catch (err: any) {
         console.error('[Socket] join-room error:', err);
       }
@@ -96,9 +89,8 @@ export const setupSocketHandlers = (io: SocketIOServer): void => {
 
     // Media toggle handlers
     socket.on('toggle-audio', (data: { roomId: string; isMuted: boolean }) => {
-      const roomPeers = rooms.get(data.roomId);
-      if (roomPeers && roomPeers.has(socket.id)) {
-        roomPeers.get(socket.id)!.isMuted = data.isMuted;
+      if (socket.data.roomId === data.roomId && socket.data.peerInfo) {
+        (socket.data.peerInfo as PeerInfo).isMuted = data.isMuted;
       }
       socket.to(data.roomId).emit('user-toggle-audio', {
         socketId: socket.id,
@@ -107,9 +99,8 @@ export const setupSocketHandlers = (io: SocketIOServer): void => {
     });
 
     socket.on('toggle-video', (data: { roomId: string; isVideoOff: boolean }) => {
-      const roomPeers = rooms.get(data.roomId);
-      if (roomPeers && roomPeers.has(socket.id)) {
-        roomPeers.get(socket.id)!.isVideoOff = data.isVideoOff;
+      if (socket.data.roomId === data.roomId && socket.data.peerInfo) {
+        (socket.data.peerInfo as PeerInfo).isVideoOff = data.isVideoOff;
       }
       socket.to(data.roomId).emit('user-toggle-video', {
         socketId: socket.id,
@@ -118,9 +109,8 @@ export const setupSocketHandlers = (io: SocketIOServer): void => {
     });
 
     socket.on('toggle-screenshare', (data: { roomId: string; isSharing: boolean }) => {
-      const roomPeers = rooms.get(data.roomId);
-      if (roomPeers && roomPeers.has(socket.id)) {
-        roomPeers.get(socket.id)!.isSharingScreen = data.isSharing;
+      if (socket.data.roomId === data.roomId && socket.data.peerInfo) {
+        (socket.data.peerInfo as PeerInfo).isSharingScreen = data.isSharing;
       }
       socket.to(data.roomId).emit('user-toggle-screenshare', {
         socketId: socket.id,
@@ -129,10 +119,9 @@ export const setupSocketHandlers = (io: SocketIOServer): void => {
     });
 
     socket.on('raise-hand', (data: { roomId: string; isHandRaised: boolean }) => {
-      const roomPeers = rooms.get(data.roomId);
       let peerName = 'Participant';
-      if (roomPeers && roomPeers.has(socket.id)) {
-        const peer = roomPeers.get(socket.id)!;
+      if (socket.data.roomId === data.roomId && socket.data.peerInfo) {
+        const peer = socket.data.peerInfo as PeerInfo;
         peer.isHandRaised = data.isHandRaised;
         peerName = peer.name;
       }
@@ -216,7 +205,7 @@ export const setupSocketHandlers = (io: SocketIOServer): void => {
     socket.on('disconnecting', () => {
       for (const roomId of socket.rooms) {
         if (roomId !== socket.id) {
-          handleUserDisconnect(socket, roomId, io);
+          handleUserDisconnect(socket, roomId, io, false);
         }
       }
     });
@@ -227,21 +216,23 @@ export const setupSocketHandlers = (io: SocketIOServer): void => {
   });
 };
 
-function handleUserDisconnect(socket: Socket, roomId: string, io: SocketIOServer): void {
-  const roomPeers = rooms.get(roomId);
-  if (roomPeers && roomPeers.has(socket.id)) {
-    const peer = roomPeers.get(socket.id)!;
-    roomPeers.delete(socket.id);
+function handleUserDisconnect(
+  socket: Socket,
+  roomId: string,
+  io: SocketIOServer,
+  leaveRoom = true
+): void {
+  const peer = socket.data.peerInfo as PeerInfo | undefined;
+  if (!peer || socket.data.roomId !== roomId) return;
 
-    if (roomPeers.size === 0) {
-      rooms.delete(roomId);
-    }
+  io.to(roomId).emit('user-left', {
+    socketId: socket.id,
+    userName: peer.name,
+  });
 
-    io.to(roomId).emit('user-left', {
-      socketId: socket.id,
-      userName: peer.name,
-    });
+  delete socket.data.peerInfo;
+  delete socket.data.roomId;
+  if (leaveRoom) socket.leave(roomId);
 
-    console.log(`[Socket] ${peer.name} (${socket.id}) left room: ${roomId}`);
-  }
+  console.log(`[Socket] ${peer.name} (${socket.id}) left room: ${roomId}`);
 }
