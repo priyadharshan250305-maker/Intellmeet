@@ -35,11 +35,16 @@ export const useWebRTC = ({
   const pendingIceCandidates = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
   const isAudioMutedRef = useRef(initialMuted);
   const isVideoOffRef = useRef(initialVideoOff);
+  const userRef = useRef(user);
   const iceServersRef = useRef<RTCIceServer[]>([
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
   ]);
+
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
 
   useEffect(() => {
     isAudioMutedRef.current = initialMuted;
@@ -217,6 +222,11 @@ export const useWebRTC = ({
       if (currentLocalStream) {
         const liveTracks = currentLocalStream.getTracks().filter((track) => track.readyState === 'live');
         liveTracks.forEach((track) => {
+          if (track.kind === 'audio') {
+            track.enabled = !isAudioMutedRef.current;
+          } else if (track.kind === 'video') {
+            track.enabled = !isVideoOffRef.current;
+          }
           pc.addTrack(track, currentLocalStream);
           console.info(`[WebRTC] Added local ${track.kind} track (${track.id}) to peer connection ${targetSocketId}`);
         });
@@ -323,7 +333,7 @@ export const useWebRTC = ({
 
       socket.emit('join-room', {
         roomId,
-        user,
+        user: userRef.current,
         isMuted: isAudioMutedRef.current,
         isVideoOff: isVideoOffRef.current,
       });
@@ -374,7 +384,12 @@ export const useWebRTC = ({
 
       offersInProgress.current.add(peerInfo.socketId);
       try {
-        const stream = localStreamRef.current || (await initializeMedia());
+        let stream = localStreamRef.current;
+        const hasLiveAudio = stream?.getAudioTracks().some((t) => t.readyState === 'live');
+        const hasLiveVideo = stream?.getVideoTracks().some((t) => t.readyState === 'live');
+        if (!stream || !hasLiveAudio || !hasLiveVideo) {
+          stream = await initializeMedia();
+        }
         if (!active || !socket.connected || !stream) return;
 
         const pc = createPeerConnection(peerInfo.socketId, peerInfo);
@@ -445,7 +460,9 @@ export const useWebRTC = ({
       if (!active || !socket || !socket.connected) return;
 
       // Ensure local media tracks exist before responding to the offer
-      if (!localStreamRef.current) {
+      const hasLiveAudio = localStreamRef.current?.getAudioTracks().some((t) => t.readyState === 'live');
+      const hasLiveVideo = localStreamRef.current?.getVideoTracks().some((t) => t.readyState === 'live');
+      if (!localStreamRef.current || !hasLiveAudio || !hasLiveVideo) {
         await initializeMedia();
       }
 
@@ -630,7 +647,7 @@ export const useWebRTC = ({
         screenTrackRef.current = null;
       }
     };
-  }, [socket, roomId, user, initializeMedia, createPeerConnection, closePeerConnection]);
+  }, [socket, roomId, initializeMedia, createPeerConnection, closePeerConnection]);
 
   // 15. Microphone and camera controls must work independently:
   //     - If microphone is enabled, the audio track must be live and sent.
