@@ -44,6 +44,16 @@ export const MeetingRoomPage: React.FC = () => {
   const [showConsentModal, setShowConsentModal] = useState(false);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
 
+  // Current participant user info
+  const participantInfo = useMemo(() => {
+    return {
+      id: user?.id,
+      name: user?.name || guestName || 'Guest User',
+      avatar: user?.avatar || '',
+      role: meeting?.isHost ? 'host' : 'participant',
+    };
+  }, [user, guestName, meeting]);
+
   // Real-time floating reactions
   const [reactions, setReactions] = useState<FloatingReaction[]>([]);
 
@@ -77,11 +87,9 @@ export const MeetingRoomPage: React.FC = () => {
     };
 
     socket.on('reaction', handleRemoteReaction);
-    socket.on('reaction-received', handleRemoteReaction);
 
     return () => {
       socket.off('reaction', handleRemoteReaction);
-      socket.off('reaction-received', handleRemoteReaction);
     };
   }, [socket, addFloatingReaction]);
 
@@ -96,14 +104,11 @@ export const MeetingRoomPage: React.FC = () => {
         socket.emit('reaction', {
           roomId: targetRoomId,
           emoji,
-        });
-        socket.emit('send-reaction', {
-          roomId: targetRoomId,
-          emoji,
+          senderName: participantInfo.name,
         });
       }
     },
-    [socket, roomId, meeting, addFloatingReaction]
+    [socket, roomId, meeting, participantInfo.name, addFloatingReaction]
   );
 
   // Fetch meeting metadata
@@ -123,16 +128,6 @@ export const MeetingRoomPage: React.FC = () => {
       })
       .finally(() => setLoading(false));
   }, [roomId]);
-
-  // Current participant user info
-  const participantInfo = useMemo(() => {
-    return {
-      id: user?.id,
-      name: user?.name || guestName || 'Guest User',
-      avatar: user?.avatar || '',
-      role: meeting?.isHost ? 'host' : 'participant',
-    };
-  }, [user, guestName, meeting]);
 
   // Join handler
   const handleJoinMeeting = async (e?: React.FormEvent) => {

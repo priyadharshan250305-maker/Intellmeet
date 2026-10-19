@@ -133,17 +133,17 @@ export const setupSocketHandlers = (io: SocketIOServer): void => {
     });
 
     // In-meeting Real-time Reactions
-    const handleReaction = (data: any) => {
-      const emoji = typeof data === 'string' ? data : (data?.emoji || data?.reaction);
+    socket.on('reaction', (data: { roomId?: string; emoji?: string; senderName?: string }) => {
+      const emoji = typeof data === 'string' ? data : (data?.emoji || (data as any)?.reaction);
       const targetRoom = (typeof data === 'object' && data?.roomId?.toString().trim())
         ? data.roomId.toString().trim()
         : socket.data.roomId;
       if (!targetRoom || !emoji) return;
 
-      let senderName = 'Participant';
-      if (socket.data.peerInfo) {
-        senderName = (socket.data.peerInfo as PeerInfo).name;
-      }
+      const senderName =
+        (typeof data === 'object' && data?.senderName?.trim()) ||
+        (socket.data.peerInfo as PeerInfo)?.name ||
+        'Participant';
 
       const payload = {
         id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -155,11 +155,7 @@ export const setupSocketHandlers = (io: SocketIOServer): void => {
 
       // Broadcast to other participants in the same meeting room
       socket.to(targetRoom).emit('reaction', payload);
-      socket.to(targetRoom).emit('reaction-received', payload);
-    };
-
-    socket.on('reaction', handleReaction);
-    socket.on('send-reaction', handleReaction);
+    });
 
     // In-meeting Chat
     socket.on('send-message', async (data: {
