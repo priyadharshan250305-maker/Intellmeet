@@ -133,20 +133,31 @@ export const setupSocketHandlers = (io: SocketIOServer): void => {
     });
 
     // In-meeting Real-time Reactions
-    socket.on('send-reaction', (data: { roomId: string; emoji: string }) => {
-      if (!data?.roomId || !data?.emoji) return;
+    const handleReaction = (data: { roomId?: string; emoji?: string }) => {
+      const targetRoom = data?.roomId || socket.data.roomId;
+      const emoji = data?.emoji;
+      if (!targetRoom || !emoji) return;
+
       let senderName = 'Participant';
-      if (socket.data.roomId === data.roomId && socket.data.peerInfo) {
+      if (socket.data.peerInfo) {
         senderName = (socket.data.peerInfo as PeerInfo).name;
       }
-      io.to(data.roomId).emit('reaction-received', {
+
+      const payload = {
         id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         socketId: socket.id,
         senderName,
-        emoji: data.emoji,
+        emoji,
         timestamp: Date.now(),
-      });
-    });
+      };
+
+      // Broadcast to other participants in the same meeting room
+      socket.to(targetRoom).emit('reaction', payload);
+      socket.to(targetRoom).emit('reaction-received', payload);
+    };
+
+    socket.on('reaction', handleReaction);
+    socket.on('send-reaction', handleReaction);
 
     // In-meeting Chat
     socket.on('send-message', async (data: {

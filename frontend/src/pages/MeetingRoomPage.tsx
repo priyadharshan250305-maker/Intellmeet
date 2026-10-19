@@ -69,26 +69,39 @@ export const MeetingRoomPage: React.FC = () => {
   useEffect(() => {
     if (!socket) return;
 
-    const handleReactionReceived = (data: { id: string; emoji: string; senderName?: string }) => {
-      addFloatingReaction(data.emoji, data.senderName);
+    const handleRemoteReaction = (data: { id?: string; emoji?: string; senderName?: string }) => {
+      if (data?.emoji) {
+        addFloatingReaction(data.emoji, data.senderName);
+      }
     };
 
-    socket.on('reaction-received', handleReactionReceived);
+    socket.on('reaction', handleRemoteReaction);
+    socket.on('reaction-received', handleRemoteReaction);
 
     return () => {
-      socket.off('reaction-received', handleReactionReceived);
+      socket.off('reaction', handleRemoteReaction);
+      socket.off('reaction-received', handleRemoteReaction);
     };
   }, [socket, addFloatingReaction]);
 
   const handleSendReaction = useCallback(
     (emoji: string) => {
-      if (!socket || !roomId) return;
-      socket.emit('send-reaction', {
-        roomId,
-        emoji,
-      });
+      // 1. Immediately show floating reaction for local user
+      addFloatingReaction(emoji, 'You');
+
+      // 2. Broadcast to other participants in the same meeting room
+      if (socket && socket.connected && roomId) {
+        socket.emit('reaction', {
+          roomId,
+          emoji,
+        });
+        socket.emit('send-reaction', {
+          roomId,
+          emoji,
+        });
+      }
     },
-    [socket, roomId]
+    [socket, roomId, addFloatingReaction]
   );
 
   // Fetch meeting metadata
