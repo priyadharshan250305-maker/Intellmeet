@@ -30,6 +30,7 @@ export const useWebRTC = ({
   const peerConnections = useRef<Map<string, RTCPeerConnection>>(new Map());
   const localStreamRef = useRef<MediaStream | null>(null);
   const screenTrackRef = useRef<MediaStreamTrack | null>(null);
+  const pendingIceCandidates = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
   const iceServersRef = useRef<RTCIceServer[]>([
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
@@ -66,10 +67,26 @@ export const useWebRTC = ({
           autoGainControl: true,
         },
       });
+      console.info('[WebRTC] getUserMedia succeeded:', {
+        streamId: stream.id,
+        audioTrackCount: stream.getAudioTracks().length,
+        videoTrackCount: stream.getVideoTracks().length,
+      });
 
       // Apply initial mute / video off settings
+      if (stream.getAudioTracks().length === 0) {
+        console.error('[WebRTC] getUserMedia succeeded without a microphone audio track.');
+      }
       stream.getAudioTracks().forEach((track) => {
         track.enabled = !initialMuted;
+        console.info('[WebRTC] Local microphone audio track:', {
+          exists: true,
+          id: track.id,
+          enabled: track.enabled,
+          muted: track.muted,
+          readyState: track.readyState,
+          settings: track.getSettings(),
+        });
       });
       stream.getVideoTracks().forEach((track) => {
         track.enabled = !initialVideoOff;
@@ -83,12 +100,31 @@ export const useWebRTC = ({
       // Fallback: create an empty or audio-only canvas stream if camera/mic is denied or not connected
       try {
         const audioOnlyStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        console.info('[WebRTC] Audio-only getUserMedia succeeded:', {
+          streamId: audioOnlyStream.id,
+          audioTrackCount: audioOnlyStream.getAudioTracks().length,
+        });
+        if (audioOnlyStream.getAudioTracks().length === 0) {
+          console.error('[WebRTC] Audio-only getUserMedia returned no microphone track.');
+        }
+        audioOnlyStream.getAudioTracks().forEach((track) => {
+          track.enabled = !initialMuted;
+          console.info('[WebRTC] Local microphone audio track:', {
+            exists: true,
+            id: track.id,
+            enabled: track.enabled,
+            muted: track.muted,
+            readyState: track.readyState,
+            settings: track.getSettings(),
+          });
+        });
         localStreamRef.current = audioOnlyStream;
         setLocalStream(audioOnlyStream);
         setIsVideoOff(true);
         return audioOnlyStream;
       } catch (audioErr) {
-        setConnectionError('Camera/Microphone permission denied or no input devices found.');
+        console.error('[WebRTC] Audio-only getUserMedia failed; no microphone stream available:', audioErr);
+        setConnectionError('Microphone access failed. Check browser permissions and input devices.');
         return null;
       }
     }
@@ -102,17 +138,34 @@ export const useWebRTC = ({
       const pc = new RTCPeerConnection({
         iceServers: iceServersRef.current,
       });
+      console.info(`[WebRTC] Created peer connection for ${peerInfo.name || targetSocketId}:`, {
+        socketId: targetSocketId,
+        iceServerCount: iceServersRef.current.length,
+        signalingState: pc.signalingState,
+      });
 
       // Add local media tracks
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach((track) => {
           pc.addTrack(track, localStreamRef.current!);
+          console.info(`[WebRTC] Added local ${track.kind} track to peer connection ${targetSocketId}:`, {
+            id: track.id,
+            enabled: track.enabled,
+            muted: track.muted,
+            readyState: track.readyState,
+          });
         });
+        if (localStreamRef.current.getAudioTracks().length === 0) {
+          console.error(`[WebRTC] No local audio track available to add for peer ${targetSocketId}.`);
+        }
+      } else {
+        console.error(`[WebRTC] Cannot add local tracks for ${targetSocketId}: local stream is missing.`);
       }
 
       // Handle ICE candidates
       pc.onicecandidate = (event) => {
         if (event.candidate) {
+          console.info(`[WebRTC] Sending ICE candidate to ${targetSocketId}:`, event.candidate.candidate);
           socket.emit('signal-ice-candidate', {
             targetSocketId,
             candidate: event.candidate,
@@ -122,8 +175,25 @@ export const useWebRTC = ({
 
       // Handle remote incoming tracks
       pc.ontrack = (event) => {
-        console.log(`[WebRTC] Received remote track from ${targetSocketId}:`, event.track.kind);
+        console.info(`[WebRTC] Received remote ${event.track.kind} track from ${targetSocketId}:`, {
+          id: event.track.id,
+          enabled: event.track.enabled,
+          muted: event.track.muted,
+          readyState: event.track.readyState,
+          streams: event.streams.length,
+        });
         const remoteStream = event.streams[0] || new MediaStream([event.track]);
+        console.info(`[WebRTC] Remote stream from ${targetSocketId}:`, {
+          id: remoteStream.id,
+          audioTrackCount: remoteStream.getAudioTracks().length,
+          audioTracks: remoteStream.getAudioTracks().map((track) => ({
+            id: track.id,
+            enabled: track.enabled,
+            muted: track.muted,
+            readyState: track.readyState,
+          })),
+          videoTrackCount: remoteStream.getVideoTracks().length,
+        });
 
         setPeers((prev) => {
           const next = new Map(prev);
@@ -146,10 +216,18 @@ export const useWebRTC = ({
       };
 
       pc.onconnectionstatechange = () => {
-        console.log(`[WebRTC] Connection state with ${targetSocketId}:`, pc.connectionState);
+        console.info(`[WebRTC] Connection state with ${targetSocketId}:`, pc.connectionState);
         if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
           // Attempt ICE restart or mark peer reconnecting
         }
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        console.info(`[WebRTC] ICE connection state with ${targetSocketId}:`, pc.iceConnectionState);
+      };
+
+      pc.onsignalingstatechange = () => {
+        console.info(`[WebRTC] Signaling state with ${targetSocketId}:`, pc.signalingState);
       };
 
       peerConnections.current.set(targetSocketId, pc);
@@ -168,6 +246,17 @@ export const useWebRTC = ({
       if (!active) return;
 
       // Join room via socket
+      console.info('[WebRTC] Joining Socket.IO room:', {
+        roomId,
+        socketId: socket.id,
+        connected: socket.connected,
+        localAudioTrackCount: mediaStream?.getAudioTracks().length || 0,
+        localAudioTracks: mediaStream?.getAudioTracks().map((track) => ({
+          enabled: track.enabled,
+          muted: track.muted,
+          readyState: track.readyState,
+        })) || [],
+      });
       socket.emit('join-room', {
         roomId,
         user,
@@ -190,6 +279,23 @@ export const useWebRTC = ({
       });
     };
 
+    const flushPendingIceCandidates = async (
+      senderSocketId: string,
+      pc: RTCPeerConnection
+    ) => {
+      const candidates = pendingIceCandidates.current.get(senderSocketId) || [];
+      pendingIceCandidates.current.delete(senderSocketId);
+
+      for (const candidate of candidates) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(candidate));
+          console.debug(`[WebRTC] Added queued ICE candidate from ${senderSocketId}`);
+        } catch (err) {
+          console.error(`[WebRTC] Error adding queued ICE candidate from ${senderSocketId}:`, err);
+        }
+      }
+    };
+
     // A new user joined the room -> existing peers initiate the WebRTC offer
     const handleUserJoined = async (peerInfo: PeerState) => {
       console.log('[WebRTC] User joined room:', peerInfo);
@@ -207,6 +313,7 @@ export const useWebRTC = ({
             offerToReceiveVideo: true,
           });
           await pc.setLocalDescription(offer);
+          console.info(`[WebRTC] Sending offer to ${peerInfo.socketId}; signaling state:`, pc.signalingState);
           socket.emit('signal-offer', {
             targetSocketId: peerInfo.socketId,
             offer,
@@ -219,7 +326,7 @@ export const useWebRTC = ({
 
     // Receive WebRTC Offer
     const handleSignalOffer = async (data: { senderSocketId: string; offer: RTCSessionDescriptionInit }) => {
-      console.log('[WebRTC] Received offer from:', data.senderSocketId);
+      console.info('[WebRTC] Received offer from:', data.senderSocketId);
       let pc = peerConnections.current.get(data.senderSocketId);
       if (!pc) {
         pc = createPeerConnection(data.senderSocketId, {})!;
@@ -228,8 +335,10 @@ export const useWebRTC = ({
       if (pc) {
         try {
           await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+          await flushPendingIceCandidates(data.senderSocketId, pc);
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
+          console.info(`[WebRTC] Sending answer to ${data.senderSocketId}; signaling state:`, pc.signalingState);
           socket.emit('signal-answer', {
             targetSocketId: data.senderSocketId,
             answer,
@@ -242,11 +351,12 @@ export const useWebRTC = ({
 
     // Receive WebRTC Answer
     const handleSignalAnswer = async (data: { senderSocketId: string; answer: RTCSessionDescriptionInit }) => {
-      console.log('[WebRTC] Received answer from:', data.senderSocketId);
+      console.info('[WebRTC] Received answer from:', data.senderSocketId);
       const pc = peerConnections.current.get(data.senderSocketId);
       if (pc) {
         try {
           await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+          await flushPendingIceCandidates(data.senderSocketId, pc);
         } catch (err: any) {
           console.error('[WebRTC] Error setting remote answer:', err);
         }
@@ -258,10 +368,19 @@ export const useWebRTC = ({
       senderSocketId: string;
       candidate: RTCIceCandidateInit;
     }) => {
+      console.info(`[WebRTC] Received ICE candidate from ${data.senderSocketId}:`, data.candidate?.candidate);
       const pc = peerConnections.current.get(data.senderSocketId);
-      if (pc && data.candidate) {
+      if (!data.candidate) return;
+
+      if (!pc || !pc.remoteDescription) {
+        const queuedCandidates = pendingIceCandidates.current.get(data.senderSocketId) || [];
+        queuedCandidates.push(data.candidate);
+        pendingIceCandidates.current.set(data.senderSocketId, queuedCandidates);
+        console.debug(`[WebRTC] Queued ICE candidate from ${data.senderSocketId}; remote description not set yet`);
+      } else {
         try {
           await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+          console.debug(`[WebRTC] Added ICE candidate from ${data.senderSocketId}`);
         } catch (err: any) {
           console.error('[WebRTC] Error adding ICE candidate:', err);
         }
@@ -349,6 +468,7 @@ export const useWebRTC = ({
       // Clean up peer connections
       peerConnections.current.forEach((pc) => pc.close());
       peerConnections.current.clear();
+      pendingIceCandidates.current.clear();
 
       // Stop local tracks
       if (localStreamRef.current) {

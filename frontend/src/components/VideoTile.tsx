@@ -1,5 +1,5 @@
-import React, { useEffect, useRef } from 'react';
-import { MicOff, Hand, Pin, Maximize2, Shield } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { MicOff, Hand, Pin, Maximize2, Shield, Volume2 } from 'lucide-react';
 
 interface VideoTileProps {
   stream?: MediaStream | null;
@@ -29,12 +29,75 @@ export const VideoTile: React.FC<VideoTileProps> = ({
   onTogglePin,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [playbackBlocked, setPlaybackBlocked] = useState(false);
 
   useEffect(() => {
     if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
+      const video = videoRef.current;
+      video.srcObject = stream;
+      video.muted = isLocal;
+      video.autoplay = true;
+      video.playsInline = true;
+
+      console.info(`[WebRTC] ${isLocal ? 'Local' : 'Remote'} media element configured for ${name}:`, {
+        hasSrcObject: video.srcObject !== null,
+        srcObject: video.srcObject,
+        audioTrackCount: stream.getAudioTracks().length,
+        muted: video.muted,
+        autoplay: video.autoplay,
+        playsInline: video.playsInline,
+      });
+
+      if (!isLocal) {
+        video.play()
+          .then(() => {
+            console.info(`[WebRTC] Remote media element audio.play() resolved for ${name}:`, {
+              paused: video.paused,
+              muted: video.muted,
+              readyState: video.readyState,
+              audioTrackCount: stream.getAudioTracks().length,
+            });
+            setPlaybackBlocked(false);
+          })
+          .catch((error: DOMException) => {
+            console.warn(`[WebRTC] Remote media element audio.play() rejected for ${name}:`, {
+              name: error.name,
+              message: error.message,
+              muted: video.muted,
+              autoplay: video.autoplay,
+              readyState: video.readyState,
+              audioTrackCount: stream.getAudioTracks().length,
+            });
+            setPlaybackBlocked(true);
+          });
+      }
     }
-  }, [stream]);
+  }, [stream, isLocal, name]);
+
+  const enableRemoteAudio = async () => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    try {
+      video.muted = false;
+      console.info(`[WebRTC] Retrying remote audio playback after user interaction for ${name}:`, {
+        hasSrcObject: video.srcObject !== null,
+        audioTrackCount: stream?.getAudioTracks().length || 0,
+        muted: video.muted,
+        autoplay: video.autoplay,
+        playsInline: video.playsInline,
+      });
+      await video.play();
+      console.info(`[WebRTC] Remote media element user-interaction audio.play() resolved for ${name}:`, {
+        paused: video.paused,
+        muted: video.muted,
+        readyState: video.readyState,
+      });
+      setPlaybackBlocked(false);
+    } catch (error) {
+      console.warn(`[WebRTC] Remote media element user-interaction audio.play() rejected for ${name}:`, error);
+    }
+  };
 
   const hasVideoStream = stream && stream.getVideoTracks().some((t) => t.enabled && t.readyState === 'live');
   const showVideo = !isVideoOff && hasVideoStream;
@@ -59,6 +122,17 @@ export const VideoTile: React.FC<VideoTileProps> = ({
           showVideo ? 'opacity-100' : 'opacity-0 absolute pointer-events-none'
         } ${isLocal && !isSharingScreen ? 'scale-x-[-1]' : ''}`} // Mirror local camera preview unless screen sharing
       />
+
+      {playbackBlocked && !isLocal && (
+        <button
+          type="button"
+          onClick={enableRemoteAudio}
+          className="absolute z-10 top-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-2 rounded-lg bg-slate-950/90 px-3 py-2 text-xs font-semibold text-white shadow-lg hover:bg-slate-800"
+        >
+          <Volume2 className="h-4 w-4" />
+          Enable audio
+        </button>
+      )}
 
       {/* Avatar Fallback when video is off */}
       {!showVideo && (
