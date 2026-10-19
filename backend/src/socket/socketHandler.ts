@@ -134,8 +134,10 @@ export const setupSocketHandlers = (io: SocketIOServer): void => {
 
     // In-meeting Real-time Reactions
     const handleMeetingReaction = (data: {
+      id?: string;
       roomId?: string;
       participantId?: string;
+      socketId?: string;
       reaction?: string;
       emoji?: string;
       senderName?: string;
@@ -157,7 +159,7 @@ export const setupSocketHandlers = (io: SocketIOServer): void => {
         'Participant';
 
       const payload = {
-        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        id: data?.id || `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         roomId: targetRoom,
         participantId,
         reaction,
@@ -179,6 +181,7 @@ export const setupSocketHandlers = (io: SocketIOServer): void => {
 
     socket.on('meeting:reaction', handleMeetingReaction);
     socket.on('reaction', handleMeetingReaction);
+    socket.on('send-reaction', handleMeetingReaction);
 
     // In-meeting Chat
     socket.on('send-message', async (data: {

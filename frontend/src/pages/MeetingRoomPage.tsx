@@ -59,6 +59,7 @@ export const MeetingRoomPage: React.FC = () => {
   // Tile reactions mapped by participant/socket ID: { [participantId: string]: string }
   const [participantReactions, setParticipantReactions] = useState<{ [id: string]: string }>({});
   const peersRef = useRef<PeerState[]>([]);
+  const seenReactionIds = useRef<Set<string>>(new Set());
 
   const showParticipantReaction = useCallback((participantId: string, reactionEmoji: string) => {
     setParticipantReactions((prev) => ({
@@ -101,6 +102,14 @@ export const MeetingRoomPage: React.FC = () => {
     if (!socket) return;
 
     const handleRemoteReaction = (data: any) => {
+      if (typeof data === 'object' && data?.id) {
+        if (seenReactionIds.current.has(data.id)) return;
+        seenReactionIds.current.add(data.id);
+        setTimeout(() => {
+          seenReactionIds.current.delete(data.id);
+        }, 5000);
+      }
+
       const reactionEmoji =
         typeof data === 'string' ? data : (data?.reaction || data?.emoji);
       if (!reactionEmoji) return;
@@ -109,23 +118,33 @@ export const MeetingRoomPage: React.FC = () => {
         typeof data === 'object'
           ? (data?.participantId || data?.socketId)
           : undefined;
+      const socketId = typeof data === 'object' ? data?.socketId : undefined;
 
       // Ignore echo from self if received
-      if (senderId && socket.id && senderId === socket.id) return;
+      if (socket.id && (socketId === socket.id || senderId === socket.id)) return;
 
       const senderName = typeof data === 'object' ? data?.senderName : undefined;
 
       // 1. Display reaction badge on the remote participant's video tile
       const currentPeers = peersRef.current;
       const matchedPeer = currentPeers.find(
-        (p) => (senderId && p.socketId === senderId) || (senderId && p.userId === senderId)
+        (p) =>
+          (socketId && p.socketId === socketId) ||
+          (senderId && (p.socketId === senderId || p.userId === senderId)) ||
+          (senderName && p.name && p.name.trim().toLowerCase() === senderName.trim().toLowerCase())
       );
 
       if (matchedPeer) {
         showParticipantReaction(matchedPeer.socketId, reactionEmoji);
+        if (matchedPeer.userId) {
+          showParticipantReaction(matchedPeer.userId, reactionEmoji);
+        }
       } else if (senderId) {
         showParticipantReaction(senderId, reactionEmoji);
-      } else if (currentPeers.length === 1) {
+      }
+
+      // In 1-on-1 calls (1 remote peer), guarantee it shows on the other participant's tile
+      if (currentPeers.length === 1) {
         showParticipantReaction(currentPeers[0].socketId, reactionEmoji);
       }
 
@@ -135,10 +154,12 @@ export const MeetingRoomPage: React.FC = () => {
 
     socket.on('meeting:reaction', handleRemoteReaction);
     socket.on('reaction', handleRemoteReaction);
+    socket.on('reaction-received', handleRemoteReaction);
 
     return () => {
       socket.off('meeting:reaction', handleRemoteReaction);
       socket.off('reaction', handleRemoteReaction);
+      socket.off('reaction-received', handleRemoteReaction);
     };
   }, [socket, addFloatingReaction, showParticipantReaction]);
 
@@ -155,13 +176,16 @@ export const MeetingRoomPage: React.FC = () => {
       const targetRoomId = (roomId || (meeting as any)?.roomId)?.trim();
       if (socket && targetRoomId) {
         const payload = {
+          id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           roomId: targetRoomId,
           participantId: socket.id || user?.id || 'local',
+          socketId: socket.id,
           reaction: emoji,
           emoji,
           senderName: participantInfo.name,
         };
         socket.emit('meeting:reaction', payload);
+        socket.emit('reaction', payload);
       }
     },
     [socket, roomId, meeting, participantInfo.name, user?.id, addFloatingReaction, showParticipantReaction]
@@ -427,7 +451,8 @@ export const MeetingRoomPage: React.FC = () => {
             {peers.map((peer) => {
               const peerReaction =
                 participantReactions[peer.socketId] ||
-                (peer.userId ? participantReactions[peer.userId] : undefined);
+                (peer.userId ? participantReactions[peer.userId] : undefined) ||
+                (peer.name ? participantReactions[peer.name] : undefined);
 
               return (
                 <VideoTile
