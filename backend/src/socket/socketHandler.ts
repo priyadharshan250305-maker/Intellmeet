@@ -132,6 +132,22 @@ export const setupSocketHandlers = (io: SocketIOServer): void => {
       });
     });
 
+    // In-meeting Real-time Reactions
+    socket.on('send-reaction', (data: { roomId: string; emoji: string }) => {
+      if (!data?.roomId || !data?.emoji) return;
+      let senderName = 'Participant';
+      if (socket.data.roomId === data.roomId && socket.data.peerInfo) {
+        senderName = (socket.data.peerInfo as PeerInfo).name;
+      }
+      io.to(data.roomId).emit('reaction-received', {
+        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        socketId: socket.id,
+        senderName,
+        emoji: data.emoji,
+        timestamp: Date.now(),
+      });
+    });
+
     // In-meeting Chat
     socket.on('send-message', async (data: {
       roomId: string;

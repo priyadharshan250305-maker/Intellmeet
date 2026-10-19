@@ -6,6 +6,7 @@ import {
   VideoOff,
   Share2,
   Hand,
+  Smile,
   MessageSquare,
   FileText,
   PhoneOff,
@@ -13,6 +14,7 @@ import {
   Check,
   MoreVertical,
 } from 'lucide-react';
+import { ReactionPicker } from './ReactionPicker';
 
 interface MeetingControlsProps {
   isMuted: boolean;
@@ -32,6 +34,7 @@ interface MeetingControlsProps {
   onToggleTranscript: () => void;
   onLeaveMeeting: () => void;
   onEndMeeting?: () => void;
+  onSendReaction?: (emoji: string) => void;
 }
 
 export const MeetingControls: React.FC<MeetingControlsProps> = ({
@@ -52,8 +55,10 @@ export const MeetingControls: React.FC<MeetingControlsProps> = ({
   onToggleTranscript,
   onLeaveMeeting,
   onEndMeeting,
+  onSendReaction,
 }) => {
   const [copied, setCopied] = useState(false);
+  const [isReactionPickerOpen, setIsReactionPickerOpen] = useState(false);
 
   const copyMeetingLink = () => {
     const url = window.location.href;
@@ -133,6 +138,30 @@ export const MeetingControls: React.FC<MeetingControlsProps> = ({
         >
           <Hand className="h-5 w-5" />
         </button>
+
+        {/* Reaction Emoji Button & Picker */}
+        {onSendReaction && (
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setIsReactionPickerOpen((prev) => !prev)}
+              className={`flex h-11 w-11 items-center justify-center rounded-xl transition-all shadow-md ${
+                isReactionPickerOpen
+                  ? 'bg-indigo-600 text-white shadow-indigo-600/30'
+                  : 'bg-slate-800 text-slate-200 hover:bg-slate-700 hover:text-white'
+              }`}
+              title="Send a reaction"
+            >
+              <Smile className="h-5 w-5" />
+            </button>
+
+            <ReactionPicker
+              isOpen={isReactionPickerOpen}
+              onClose={() => setIsReactionPickerOpen(false)}
+              onSelectReaction={onSendReaction}
+            />
+          </div>
+        )}
 
         {/* Leave Meeting (Red button) */}
         <button

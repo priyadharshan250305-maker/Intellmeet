@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
@@ -11,6 +11,7 @@ import { MeetingControls } from '../components/MeetingControls';
 import { ChatDrawer } from '../components/ChatDrawer';
 import { TranscriptionDrawer } from '../components/TranscriptionDrawer';
 import { ConsentModal } from '../components/ConsentModal';
+import { FloatingReactions, FloatingReaction } from '../components/FloatingReactions';
 import {
   Lock,
   AlertCircle,
@@ -42,6 +43,53 @@ export const MeetingRoomPage: React.FC = () => {
   const [hasConsent, setHasConsent] = useState(false);
   const [showConsentModal, setShowConsentModal] = useState(false);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
+
+  // Real-time floating reactions
+  const [reactions, setReactions] = useState<FloatingReaction[]>([]);
+
+  const addFloatingReaction = useCallback((emoji: string, senderName?: string) => {
+    const id = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const leftPercent = 15 + Math.random() * 65;
+
+    const newReaction: FloatingReaction = {
+      id,
+      emoji,
+      senderName,
+      leftPercent,
+    };
+
+    setReactions((prev) => [...prev, newReaction]);
+
+    setTimeout(() => {
+      setReactions((prev) => prev.filter((r) => r.id !== id));
+    }, 2800);
+  }, []);
+
+  // Listen for broadcast reactions from any participant in room
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleReactionReceived = (data: { id: string; emoji: string; senderName?: string }) => {
+      addFloatingReaction(data.emoji, data.senderName);
+    };
+
+    socket.on('reaction-received', handleReactionReceived);
+
+    return () => {
+      socket.off('reaction-received', handleReactionReceived);
+    };
+  }, [socket, addFloatingReaction]);
+
+  const handleSendReaction = useCallback(
+    (emoji: string) => {
+      if (!socket || !roomId) return;
+      socket.emit('send-reaction', {
+        roomId,
+        emoji,
+      });
+    },
+    [socket, roomId]
+  );
 
   // Fetch meeting metadata
   useEffect(() => {
@@ -262,6 +310,9 @@ export const MeetingRoomPage: React.FC = () => {
 
       {/* Main Video Grid and Drawers */}
       <div className="flex flex-1 overflow-hidden relative">
+        {/* Floating Reactions Animation Overlay */}
+        <FloatingReactions reactions={reactions} />
+
         {/* Video Tiles Grid Area */}
         <div className="flex-1 p-3 sm:p-4 overflow-y-auto flex items-center justify-center">
           {connectionError && (
@@ -372,6 +423,7 @@ export const MeetingRoomPage: React.FC = () => {
         onToggleTranscript={() => setIsTranscriptOpen((prev) => !prev)}
         onLeaveMeeting={handleLeaveMeeting}
         onEndMeeting={handleEndMeeting}
+        onSendReaction={handleSendReaction}
       />
 
       {/* Participant Notice & AI Transcription Consent Modal */}
