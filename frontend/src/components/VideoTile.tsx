@@ -32,47 +32,61 @@ export const VideoTile: React.FC<VideoTileProps> = ({
   const [playbackBlocked, setPlaybackBlocked] = useState(false);
 
   useEffect(() => {
-    if (videoRef.current && stream) {
-      const video = videoRef.current;
+    const video = videoRef.current;
+    if (!video) return;
+
+    if (stream) {
       video.srcObject = stream;
-      video.muted = isLocal;
       video.autoplay = true;
       video.playsInline = true;
 
-      console.info(`[WebRTC] ${isLocal ? 'Local' : 'Remote'} media element configured for ${name}:`, {
-        hasSrcObject: video.srcObject !== null,
-        srcObject: video.srcObject,
-        audioTrackCount: stream.getAudioTracks().length,
-        muted: video.muted,
-        autoplay: video.autoplay,
-        playsInline: video.playsInline,
-      });
-
-      if (!isLocal) {
-        video.play()
+      if (isLocal) {
+        // Local preview is always muted to prevent audio feedback echo
+        video.muted = true;
+      } else {
+        // Remote video element must NOT be muted
+        video.muted = false;
+        video
+          .play()
           .then(() => {
-            console.info(`[WebRTC] Remote media element audio.play() resolved for ${name}:`, {
-              paused: video.paused,
-              muted: video.muted,
-              readyState: video.readyState,
-              audioTrackCount: stream.getAudioTracks().length,
-            });
             setPlaybackBlocked(false);
           })
           .catch((error: DOMException) => {
-            console.warn(`[WebRTC] Remote media element audio.play() rejected for ${name}:`, {
-              name: error.name,
-              message: error.message,
-              muted: video.muted,
-              autoplay: video.autoplay,
-              readyState: video.readyState,
-              audioTrackCount: stream.getAudioTracks().length,
-            });
+            console.warn(`[WebRTC] Remote media element play() rejected for ${name}:`, error.message);
+            // Autoplay policy may block unmuted audio without user interaction
             setPlaybackBlocked(true);
           });
       }
+    } else {
+      video.srcObject = null;
     }
   }, [stream, isLocal, name]);
+
+  // If playback was blocked by browser autoplay policy, retry upon any user interaction
+  useEffect(() => {
+    if (!playbackBlocked || isLocal) return;
+
+    const resumePlayback = () => {
+      const video = videoRef.current;
+      if (video) {
+        video.muted = false;
+        video
+          .play()
+          .then(() => setPlaybackBlocked(false))
+          .catch(() => {});
+      }
+    };
+
+    window.addEventListener('click', resumePlayback, { once: true });
+    window.addEventListener('keydown', resumePlayback, { once: true });
+    window.addEventListener('touchstart', resumePlayback, { once: true });
+
+    return () => {
+      window.removeEventListener('click', resumePlayback);
+      window.removeEventListener('keydown', resumePlayback);
+      window.removeEventListener('touchstart', resumePlayback);
+    };
+  }, [playbackBlocked, isLocal]);
 
   const enableRemoteAudio = async () => {
     const video = videoRef.current;
@@ -80,26 +94,16 @@ export const VideoTile: React.FC<VideoTileProps> = ({
 
     try {
       video.muted = false;
-      console.info(`[WebRTC] Retrying remote audio playback after user interaction for ${name}:`, {
-        hasSrcObject: video.srcObject !== null,
-        audioTrackCount: stream?.getAudioTracks().length || 0,
-        muted: video.muted,
-        autoplay: video.autoplay,
-        playsInline: video.playsInline,
-      });
       await video.play();
-      console.info(`[WebRTC] Remote media element user-interaction audio.play() resolved for ${name}:`, {
-        paused: video.paused,
-        muted: video.muted,
-        readyState: video.readyState,
-      });
       setPlaybackBlocked(false);
     } catch (error) {
-      console.warn(`[WebRTC] Remote media element user-interaction audio.play() rejected for ${name}:`, error);
+      console.warn(`[WebRTC] Manual audio playback failed for ${name}:`, error);
     }
   };
 
-  const hasVideoStream = stream && stream.getVideoTracks().some((t) => t.enabled && t.readyState === 'live');
+  const hasVideoStream = Boolean(
+    stream && stream.getVideoTracks().some((t) => t.readyState === 'live')
+  );
   const showVideo = !isVideoOff && hasVideoStream;
 
   return (
@@ -117,20 +121,27 @@ export const VideoTile: React.FC<VideoTileProps> = ({
         ref={videoRef}
         autoPlay
         playsInline
-        muted={isLocal} // Always mute local video element to prevent echo feedback
+        muted={isLocal}
+        onLoadedMetadata={(e) => {
+          const el = e.currentTarget;
+          if (!isLocal) {
+            el.muted = false;
+            el.play().then(() => setPlaybackBlocked(false)).catch(() => setPlaybackBlocked(true));
+          }
+        }}
         className={`h-full w-full object-cover transition-opacity duration-300 ${
           showVideo ? 'opacity-100' : 'opacity-0 absolute pointer-events-none'
-        } ${isLocal && !isSharingScreen ? 'scale-x-[-1]' : ''}`} // Mirror local camera preview unless screen sharing
+        } ${isLocal && !isSharingScreen ? 'scale-x-[-1]' : ''}`}
       />
 
       {playbackBlocked && !isLocal && (
         <button
           type="button"
           onClick={enableRemoteAudio}
-          className="absolute z-10 top-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-2 rounded-lg bg-slate-950/90 px-3 py-2 text-xs font-semibold text-white shadow-lg hover:bg-slate-800"
+          className="absolute z-10 top-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-2 rounded-lg bg-slate-950/90 px-3 py-2 text-xs font-semibold text-white shadow-lg hover:bg-slate-800 border border-slate-700"
         >
-          <Volume2 className="h-4 w-4" />
-          Enable audio
+          <Volume2 className="h-4 w-4 text-indigo-400" />
+          Click to enable audio
         </button>
       )}
 
