@@ -99,7 +99,7 @@ export const useWebRTC = ({
 
     let acquiredStream: MediaStream | null = null;
     try {
-      // Primary attempt: Request both audio and video together in one unified getUserMedia call
+      // Primary attempt: Request both audio and video with flexible mobile & desktop camera constraints
       acquiredStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -107,43 +107,47 @@ export const useWebRTC = ({
           autoGainControl: true,
         },
         video: {
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
           facingMode: 'user',
         },
       });
       console.info('[WebRTC] Acquired both audio and video via getUserMedia({ audio: true, video: true })');
     } catch (bothError: any) {
-      console.warn('[WebRTC] Unified getUserMedia failed, attempting fallbacks:', bothError.name, bothError.message);
-      // Fallback 1: Audio only
+      console.warn('[WebRTC] Primary getUserMedia failed, attempting basic { audio: true, video: true }:', bothError.name);
       try {
+        // Second attempt: Basic audio and video without extra constraints
         acquiredStream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
-          video: false,
+          audio: true,
+          video: true,
         });
-        setConnectionError('Camera unavailable. Joined with microphone only.');
-        console.info('[WebRTC] Acquired audio-only fallback stream');
-      } catch (audioError: any) {
-        // Fallback 2: Video only
+      } catch (basicError: any) {
+        // Fallback 1: Audio only
         try {
           acquiredStream = await navigator.mediaDevices.getUserMedia({
-            audio: false,
-            video: {
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
-              facingMode: 'user',
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
             },
+            video: false,
           });
-          setConnectionError('Microphone unavailable. Joined with camera only.');
-          console.info('[WebRTC] Acquired video-only fallback stream');
-        } catch (videoError: any) {
-          console.error('[WebRTC] All media device acquisitions failed:', videoError);
-          setConnectionError('Microphone and camera are unavailable. Check browser permissions and devices.');
-          return null;
+          setConnectionError('Camera unavailable. Joined with microphone only.');
+          console.info('[WebRTC] Acquired audio-only fallback stream');
+        } catch (audioError: any) {
+          // Fallback 2: Video only
+          try {
+            acquiredStream = await navigator.mediaDevices.getUserMedia({
+              audio: false,
+              video: {
+                facingMode: 'user',
+              },
+            });
+            setConnectionError('Microphone unavailable. Joined with camera only.');
+            console.info('[WebRTC] Acquired video-only fallback stream');
+          } catch (videoError: any) {
+            console.error('[WebRTC] All media device acquisitions failed:', videoError);
+            setConnectionError('Microphone and camera are unavailable. Check browser permissions and devices.');
+            return null;
+          }
         }
       }
     }
@@ -694,8 +698,6 @@ export const useWebRTC = ({
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: false,
           video: {
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
             facingMode: 'user',
           },
         });

@@ -55,6 +55,9 @@ export const VideoTile: React.FC<VideoTileProps> = ({
             console.warn(`[WebRTC] Remote media element play() rejected for ${name}:`, error.message);
             // Autoplay policy may block unmuted audio without user interaction
             setPlaybackBlocked(true);
+            // Start video playback muted so camera video appears immediately, then user gesture unmutes audio
+            video.muted = true;
+            video.play().catch(() => {});
           });
       }
     } else {
@@ -126,7 +129,13 @@ export const VideoTile: React.FC<VideoTileProps> = ({
           const el = e.currentTarget;
           if (!isLocal) {
             el.muted = false;
-            el.play().then(() => setPlaybackBlocked(false)).catch(() => setPlaybackBlocked(true));
+            el.play()
+              .then(() => setPlaybackBlocked(false))
+              .catch(() => {
+                setPlaybackBlocked(true);
+                el.muted = true;
+                el.play().catch(() => {});
+              });
           }
         }}
         className={`h-full w-full object-cover transition-opacity duration-300 ${
