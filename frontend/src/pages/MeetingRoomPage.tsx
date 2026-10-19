@@ -69,9 +69,10 @@ export const MeetingRoomPage: React.FC = () => {
   useEffect(() => {
     if (!socket) return;
 
-    const handleRemoteReaction = (data: { id?: string; emoji?: string; senderName?: string }) => {
-      if (data?.emoji) {
-        addFloatingReaction(data.emoji, data.senderName);
+    const handleRemoteReaction = (data: any) => {
+      const emoji = typeof data === 'string' ? data : (data?.emoji || data?.reaction);
+      if (emoji) {
+        addFloatingReaction(emoji, typeof data === 'object' ? data?.senderName : undefined);
       }
     };
 
@@ -90,18 +91,19 @@ export const MeetingRoomPage: React.FC = () => {
       addFloatingReaction(emoji, 'You');
 
       // 2. Broadcast to other participants in the same meeting room
-      if (socket && socket.connected && roomId) {
+      const targetRoomId = (roomId || (meeting as any)?.roomId)?.trim();
+      if (socket && targetRoomId) {
         socket.emit('reaction', {
-          roomId,
+          roomId: targetRoomId,
           emoji,
         });
         socket.emit('send-reaction', {
-          roomId,
+          roomId: targetRoomId,
           emoji,
         });
       }
     },
-    [socket, roomId, addFloatingReaction]
+    [socket, roomId, meeting, addFloatingReaction]
   );
 
   // Fetch meeting metadata

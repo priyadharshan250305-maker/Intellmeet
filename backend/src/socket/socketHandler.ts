@@ -133,9 +133,11 @@ export const setupSocketHandlers = (io: SocketIOServer): void => {
     });
 
     // In-meeting Real-time Reactions
-    const handleReaction = (data: { roomId?: string; emoji?: string }) => {
-      const targetRoom = data?.roomId || socket.data.roomId;
-      const emoji = data?.emoji;
+    const handleReaction = (data: any) => {
+      const emoji = typeof data === 'string' ? data : (data?.emoji || data?.reaction);
+      const targetRoom = (typeof data === 'object' && data?.roomId?.toString().trim())
+        ? data.roomId.toString().trim()
+        : socket.data.roomId;
       if (!targetRoom || !emoji) return;
 
       let senderName = 'Participant';
