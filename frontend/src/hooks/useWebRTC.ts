@@ -241,17 +241,20 @@ export const useWebRTC = ({
     if (!socket || !roomId) return;
 
     let active = true;
+    let mediaReady = false;
+    let hasJoinedRoom = false;
+    let hasConnectedBefore = socket.connected;
 
-    initializeMedia().then((mediaStream) => {
-      if (!active) return;
+    const joinSocketRoom = () => {
+      if (!active || !mediaReady || !socket.connected || hasJoinedRoom) return;
 
-      // Join room via socket
+      hasJoinedRoom = true;
       console.info('[WebRTC] Joining Socket.IO room:', {
         roomId,
         socketId: socket.id,
         connected: socket.connected,
-        localAudioTrackCount: mediaStream?.getAudioTracks().length || 0,
-        localAudioTracks: mediaStream?.getAudioTracks().map((track) => ({
+        localAudioTrackCount: localStreamRef.current?.getAudioTracks().length || 0,
+        localAudioTracks: localStreamRef.current?.getAudioTracks().map((track) => ({
           enabled: track.enabled,
           muted: track.muted,
           readyState: track.readyState,
@@ -263,6 +266,34 @@ export const useWebRTC = ({
         isMuted: initialMuted,
         isVideoOff: initialVideoOff,
       });
+    };
+
+    const handleSocketConnect = () => {
+      console.info('[WebRTC] Socket connected for room:', roomId, socket.id);
+      if (hasConnectedBefore) {
+        console.info('[WebRTC] Socket reconnected; clearing stale peer connections and rejoining room:', roomId);
+        peerConnections.current.forEach((pc) => pc.close());
+        peerConnections.current.clear();
+        pendingIceCandidates.current.clear();
+        setPeers(new Map());
+        hasJoinedRoom = false;
+      }
+      hasConnectedBefore = true;
+      joinSocketRoom();
+    };
+
+    const handleSocketDisconnect = (reason: string) => {
+      console.warn('[WebRTC] Socket disconnected from room:', roomId, reason);
+      hasJoinedRoom = false;
+    };
+
+    socket.on('connect', handleSocketConnect);
+    socket.on('disconnect', handleSocketDisconnect);
+
+    initializeMedia().then((mediaStream) => {
+      if (!active) return;
+      mediaReady = true;
+      joinSocketRoom();
     });
 
     // Received existing participants from server
@@ -464,6 +495,8 @@ export const useWebRTC = ({
       socket.off('user-toggle-screenshare', handleUserToggleScreenshare);
       socket.off('user-raise-hand', handleUserRaiseHand);
       socket.off('user-left', handleUserLeft);
+      socket.off('connect', handleSocketConnect);
+      socket.off('disconnect', handleSocketDisconnect);
 
       // Clean up peer connections
       peerConnections.current.forEach((pc) => pc.close());
