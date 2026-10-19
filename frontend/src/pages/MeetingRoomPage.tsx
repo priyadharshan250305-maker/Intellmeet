@@ -56,6 +56,26 @@ export const MeetingRoomPage: React.FC = () => {
 
   // Real-time floating reactions
   const [reactions, setReactions] = useState<FloatingReaction[]>([]);
+  // Tile reactions mapped by participant/socket ID: { [participantId: string]: string }
+  const [participantReactions, setParticipantReactions] = useState<{ [id: string]: string }>({});
+
+  const showParticipantReaction = useCallback((participantId: string, reactionEmoji: string) => {
+    setParticipantReactions((prev) => ({
+      ...prev,
+      [participantId]: reactionEmoji,
+    }));
+
+    setTimeout(() => {
+      setParticipantReactions((prev) => {
+        if (prev[participantId] === reactionEmoji) {
+          const next = { ...prev };
+          delete next[participantId];
+          return next;
+        }
+        return prev;
+      });
+    }, 2800);
+  }, []);
 
   const addFloatingReaction = useCallback((emoji: string, senderName?: string) => {
     const id = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -80,35 +100,62 @@ export const MeetingRoomPage: React.FC = () => {
     if (!socket) return;
 
     const handleRemoteReaction = (data: any) => {
-      const emoji = typeof data === 'string' ? data : (data?.emoji || data?.reaction);
-      if (emoji) {
-        addFloatingReaction(emoji, typeof data === 'object' ? data?.senderName : undefined);
+      const reactionEmoji =
+        typeof data === 'string' ? data : (data?.reaction || data?.emoji);
+      if (!reactionEmoji) return;
+
+      const senderId =
+        typeof data === 'object'
+          ? (data?.participantId || data?.socketId)
+          : undefined;
+
+      // Ignore echo from self if received
+      if (senderId && socket.id && senderId === socket.id) return;
+
+      const senderName = typeof data === 'object' ? data?.senderName : undefined;
+
+      // 1. Display reaction badge on the remote participant's video tile
+      if (senderId) {
+        showParticipantReaction(senderId, reactionEmoji);
       }
+
+      // 2. Also trigger floating reaction overlay
+      addFloatingReaction(reactionEmoji, senderName);
     };
 
+    socket.on('meeting:reaction', handleRemoteReaction);
     socket.on('reaction', handleRemoteReaction);
 
     return () => {
+      socket.off('meeting:reaction', handleRemoteReaction);
       socket.off('reaction', handleRemoteReaction);
     };
-  }, [socket, addFloatingReaction]);
+  }, [socket, addFloatingReaction, showParticipantReaction]);
 
   const handleSendReaction = useCallback(
     (emoji: string) => {
-      // 1. Immediately show floating reaction for local user
+      // 1. Immediately show floating reaction and tile reaction for local user
       addFloatingReaction(emoji, 'You');
+      showParticipantReaction('local', emoji);
+      if (socket?.id) {
+        showParticipantReaction(socket.id, emoji);
+      }
 
       // 2. Broadcast to other participants in the same meeting room
       const targetRoomId = (roomId || (meeting as any)?.roomId)?.trim();
       if (socket && targetRoomId) {
-        socket.emit('reaction', {
+        const payload = {
           roomId: targetRoomId,
+          participantId: socket.id || user?.id || 'local',
+          reaction: emoji,
           emoji,
           senderName: participantInfo.name,
-        });
+        };
+        socket.emit('meeting:reaction', payload);
+        socket.emit('reaction', payload);
       }
     },
-    [socket, roomId, meeting, participantInfo.name, addFloatingReaction]
+    [socket, roomId, meeting, participantInfo.name, user?.id, addFloatingReaction, showParticipantReaction]
   );
 
   // Fetch meeting metadata
@@ -355,6 +402,10 @@ export const MeetingRoomPage: React.FC = () => {
               isVideoOff={isVideoOff}
               isSharingScreen={isScreenSharing}
               isHandRaised={isHandRaised}
+              reaction={
+                participantReactions['local'] ||
+                (socket?.id ? participantReactions[socket.id] : undefined)
+              }
               isPinned={pinnedSocketId === 'local'}
               onTogglePin={() =>
                 setPinnedSocketId((prev) => (prev === 'local' ? null : 'local'))
@@ -362,26 +413,33 @@ export const MeetingRoomPage: React.FC = () => {
             />
 
             {/* Remote Peer Video Tiles */}
-            {peers.map((peer) => (
-              <VideoTile
-                key={peer.socketId}
-                stream={peer.stream}
-                name={peer.name}
-                avatar={peer.avatar}
-                role={peer.role}
-                isLocal={false}
-                isMuted={peer.isMuted}
-                isVideoOff={peer.isVideoOff}
-                isSharingScreen={peer.isSharingScreen}
-                isHandRaised={peer.isHandRaised}
-                isPinned={pinnedSocketId === peer.socketId}
-                onTogglePin={() =>
-                  setPinnedSocketId((prev) =>
-                    prev === peer.socketId ? null : peer.socketId
-                  )
-                }
-              />
-            ))}
+            {peers.map((peer) => {
+              const peerReaction =
+                participantReactions[peer.socketId] ||
+                (peer.userId ? participantReactions[peer.userId] : undefined);
+
+              return (
+                <VideoTile
+                  key={peer.socketId}
+                  stream={peer.stream}
+                  name={peer.name}
+                  avatar={peer.avatar}
+                  role={peer.role}
+                  isLocal={false}
+                  isMuted={peer.isMuted}
+                  isVideoOff={peer.isVideoOff}
+                  isSharingScreen={peer.isSharingScreen}
+                  isHandRaised={peer.isHandRaised}
+                  reaction={peerReaction}
+                  isPinned={pinnedSocketId === peer.socketId}
+                  onTogglePin={() =>
+                    setPinnedSocketId((prev) =>
+                      prev === peer.socketId ? null : peer.socketId
+                    )
+                  }
+                />
+              );
+            })}
           </div>
         </div>
 

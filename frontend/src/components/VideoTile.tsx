@@ -13,6 +13,7 @@ interface VideoTileProps {
   isHandRaised?: boolean;
   isPinned?: boolean;
   onTogglePin?: () => void;
+  reaction?: string | null;
 }
 
 export const VideoTile: React.FC<VideoTileProps> = ({
@@ -27,6 +28,7 @@ export const VideoTile: React.FC<VideoTileProps> = ({
   isHandRaised = false,
   isPinned = false,
   onTogglePin,
+  reaction,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [playbackBlocked, setPlaybackBlocked] = useState(false);
@@ -217,6 +219,17 @@ export const VideoTile: React.FC<VideoTileProps> = ({
       {isSharingScreen && (
         <div className="absolute top-2.5 left-2.5 rounded-lg bg-indigo-600/90 backdrop-blur-md px-2 py-1 text-[11px] font-medium text-white shadow-sm flex items-center gap-1">
           <Maximize2 className="h-3 w-3" /> Screen Shared
+        </div>
+      )}
+
+      {/* Participant Reaction Emoji Badge */}
+      {reaction && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30 animate-in zoom-in-75 fade-in duration-150">
+          <div className="flex items-center justify-center rounded-2xl bg-slate-950/85 backdrop-blur-md px-4 py-2.5 shadow-2xl border border-white/20 animate-bounce">
+            <span className="text-4xl sm:text-5xl select-none leading-none drop-shadow-md">
+              {reaction}
+            </span>
+          </div>
         </div>
       )}
     </div>

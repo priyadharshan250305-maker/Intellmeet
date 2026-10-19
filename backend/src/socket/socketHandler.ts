@@ -133,12 +133,22 @@ export const setupSocketHandlers = (io: SocketIOServer): void => {
     });
 
     // In-meeting Real-time Reactions
-    socket.on('reaction', (data: { roomId?: string; emoji?: string; senderName?: string }) => {
-      const emoji = typeof data === 'string' ? data : (data?.emoji || (data as any)?.reaction);
+    const handleMeetingReaction = (data: {
+      roomId?: string;
+      participantId?: string;
+      reaction?: string;
+      emoji?: string;
+      senderName?: string;
+    }) => {
+      const reaction = data?.reaction || data?.emoji || (typeof data === 'string' ? data : '');
       const targetRoom = (typeof data === 'object' && data?.roomId?.toString().trim())
         ? data.roomId.toString().trim()
         : socket.data.roomId;
-      if (!targetRoom || !emoji) return;
+      if (!targetRoom || !reaction) return;
+
+      const participantId = (typeof data === 'object' && data?.participantId)
+        ? data.participantId
+        : socket.id;
 
       const senderName =
         (typeof data === 'object' && data?.senderName?.trim()) ||
@@ -147,15 +157,22 @@ export const setupSocketHandlers = (io: SocketIOServer): void => {
 
       const payload = {
         id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        socketId: socket.id,
+        roomId: targetRoom,
+        participantId,
+        reaction,
+        emoji: reaction,
         senderName,
-        emoji,
+        socketId: socket.id,
         timestamp: Date.now(),
       };
 
       // Broadcast to other participants in the same meeting room
+      socket.to(targetRoom).emit('meeting:reaction', payload);
       socket.to(targetRoom).emit('reaction', payload);
-    });
+    };
+
+    socket.on('meeting:reaction', handleMeetingReaction);
+    socket.on('reaction', handleMeetingReaction);
 
     // In-meeting Chat
     socket.on('send-message', async (data: {
