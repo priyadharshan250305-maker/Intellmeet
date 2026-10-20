@@ -29,11 +29,9 @@ export const setupSocketHandlers = (io: SocketIOServer): void => {
     }) => {
       try {
         const { roomId, user, isMuted = false, isVideoOff = false } = data;
-        const cleanRoom = roomId.toString().trim();
-        await socket.join(cleanRoom);
-        if (cleanRoom.toLowerCase() !== cleanRoom) {
-          await socket.join(cleanRoom.toLowerCase());
-        }
+        if (!roomId) return;
+
+        await socket.join(roomId);
         const peerInfo: PeerInfo = {
           socketId: socket.id,
           userId: user?.id,
@@ -47,22 +45,19 @@ export const setupSocketHandlers = (io: SocketIOServer): void => {
           joinedAt: new Date(),
         };
         socket.data.peerInfo = peerInfo;
-        socket.data.roomId = cleanRoom;
+        socket.data.roomId = roomId;
 
         // Adapter-backed room enumeration includes sockets on other instances.
-        const roomSockets = await io.in(cleanRoom).fetchSockets();
+        const roomSockets = await io.in(roomId).fetchSockets();
         const existingParticipants = roomSockets
           .filter((peerSocket) => peerSocket.id !== socket.id && peerSocket.data.peerInfo)
           .map((peerSocket) => peerSocket.data.peerInfo as PeerInfo);
         socket.emit('existing-participants', existingParticipants);
 
         // Broadcast to all other participants that a new peer joined
-        socket.to(cleanRoom).emit('user-joined', peerInfo);
-        if (cleanRoom.toLowerCase() !== cleanRoom) {
-          socket.to(cleanRoom.toLowerCase()).emit('user-joined', peerInfo);
-        }
+        socket.to(roomId).emit('user-joined', peerInfo);
 
-        console.log(`[Socket] ${peerInfo.name} (${socket.id}) joined room: ${cleanRoom}. Total: ${roomSockets.length}`);
+        console.log(`[Socket] ${peerInfo.name} (${socket.id}) joined room: ${roomId}. Total: ${roomSockets.length}`);
       } catch (err: any) {
         console.error('[Socket] join-room error:', err);
       }
@@ -193,20 +188,9 @@ export const setupSocketHandlers = (io: SocketIOServer): void => {
         if (!socket.rooms.has(targetRoom)) {
           await socket.join(targetRoom);
         }
-        if (targetRoom.toLowerCase() !== targetRoom && !socket.rooms.has(targetRoom.toLowerCase())) {
-          await socket.join(targetRoom.toLowerCase());
-        }
 
         // Broadcast ONLY to sockets currently joined to the SAME roomId (no sender echo)
         socket.to(targetRoom).emit('meeting:reaction', payload);
-
-        if (targetRoom.toLowerCase() !== targetRoom) {
-          socket.to(targetRoom.toLowerCase()).emit('meeting:reaction', payload);
-        }
-
-        if (socket.data.roomId && socket.data.roomId !== targetRoom && socket.data.roomId !== targetRoom.toLowerCase()) {
-          socket.to(socket.data.roomId).emit('meeting:reaction', payload);
-        }
       } catch (err: any) {
         console.error('[Socket] meeting:reaction broadcast error:', err);
       }
