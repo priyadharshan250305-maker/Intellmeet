@@ -160,10 +160,14 @@ export const MeetingRoomPage: React.FC = () => {
         if (matchedPeer.userId) {
           showParticipantReaction(matchedPeer.userId, reactionEmoji);
         }
+        if (matchedPeer.name) {
+          showParticipantReaction(matchedPeer.name, reactionEmoji);
+        }
       } else {
         if (senderSocketId) showParticipantReaction(senderSocketId, reactionEmoji);
         if (senderParticipantId) showParticipantReaction(senderParticipantId, reactionEmoji);
         if (senderUserId) showParticipantReaction(senderUserId, reactionEmoji);
+        if (senderName) showParticipantReaction(senderName, reactionEmoji);
       }
 
       // Guarantee badge displays on the remote participant's tile in 1-on-1 calls
@@ -176,9 +180,11 @@ export const MeetingRoomPage: React.FC = () => {
     };
 
     socket.on('meeting:reaction', handleRemoteReaction);
+    socket.on('reaction', handleRemoteReaction);
 
     return () => {
       socket.off('meeting:reaction', handleRemoteReaction);
+      socket.off('reaction', handleRemoteReaction);
     };
   }, [socket, addFloatingReaction, showParticipantReaction]);
 
@@ -209,6 +215,7 @@ export const MeetingRoomPage: React.FC = () => {
           roomId: cleanRoomId,
           participantId: socket.id || user?.id || 'local',
           socketId: socket.id,
+          userId: user?.id,
           senderName: participantInfo.name,
           reaction: emoji,
           reactionId,

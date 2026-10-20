@@ -189,7 +189,7 @@ export const setupSocketHandlers = (io: SocketIOServer): void => {
           await socket.join(targetRoom);
         }
 
-        // Broadcast ONLY to sockets currently joined to the SAME roomId (no sender echo)
+        // Broadcast ONLY to other sockets joined to the SAME roomId (no sender echo)
         socket.to(targetRoom).emit('meeting:reaction', payload);
       } catch (err: any) {
         console.error('[Socket] meeting:reaction broadcast error:', err);
