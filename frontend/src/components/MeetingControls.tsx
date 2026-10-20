@@ -61,7 +61,11 @@ export const MeetingControls: React.FC<MeetingControlsProps> = ({
   const [isReactionPickerOpen, setIsReactionPickerOpen] = useState(false);
 
   const copyMeetingLink = () => {
-    const url = window.location.href;
+    const origin = window.location.origin;
+    const cleanRoomId = (roomId || '').trim();
+    const url = cleanRoomId
+      ? `${origin}/room/${cleanRoomId}`
+      : window.location.href.split('?')[0].split('#')[0];
     navigator.clipboard.writeText(url);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
