@@ -137,71 +137,83 @@ export const setupSocketHandlers = (io: SocketIOServer): void => {
       });
     });
 
-    // In-meeting Real-time Reactions
+    // Dedicated In-meeting Real-time Reactions Handler
     const handleMeetingReaction = async (data: {
-      id?: string;
       roomId?: string;
       participantId?: string;
       socketId?: string;
-      userId?: string;
-      reaction?: string;
-      emoji?: string;
       senderName?: string;
+      reaction?: string;
+      reactionId?: string;
+      timestamp?: number;
+      id?: string;
+      emoji?: string;
+      userId?: string;
     }) => {
-      const reaction = data?.reaction || data?.emoji || (typeof data === 'string' ? data : '');
-      const targetRoom = (typeof data === 'object' && data?.roomId?.toString().trim())
-        ? data.roomId.toString().trim()
-        : socket.data.roomId;
-      if (!targetRoom || !reaction) return;
+      try {
+        const reaction = data?.reaction || data?.emoji || (typeof data === 'string' ? data : '');
+        const targetRoom = (typeof data === 'object' && data?.roomId?.toString().trim())
+          ? data.roomId.toString().trim()
+          : socket.data.roomId;
+        if (!targetRoom || !reaction) return;
 
-      const participantId =
-        (typeof data === 'object' && data?.participantId && data.participantId !== 'local')
-          ? data.participantId
-          : socket.id;
+        const senderSocketId = socket.id;
+        const participantId =
+          (typeof data === 'object' && data?.participantId && data.participantId !== 'local')
+            ? data.participantId
+            : senderSocketId;
 
-      const senderName =
-        (typeof data === 'object' && data?.senderName?.trim()) ||
-        (socket.data.peerInfo as PeerInfo)?.name ||
-        'Participant';
+        const senderName =
+          (typeof data === 'object' && data?.senderName?.trim()) ||
+          (socket.data.peerInfo as PeerInfo)?.name ||
+          'Participant';
 
-      const payload = {
-        id: data?.id || `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        roomId: targetRoom,
-        participantId: socket.id || participantId,
-        reaction,
-        emoji: reaction,
-        senderName,
-        socketId: socket.id,
-        userId: data?.userId || (socket.data.peerInfo as PeerInfo)?.userId,
-        timestamp: Date.now(),
-      };
+        const reactionId =
+          (typeof data === 'object' && (data?.reactionId || data?.id)) ||
+          `reaction-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
-      // Ensure socket is in targetRoom so socket membership is always guaranteed
-      if (!socket.rooms.has(targetRoom)) {
-        await socket.join(targetRoom);
-      }
-      if (targetRoom.toLowerCase() !== targetRoom && !socket.rooms.has(targetRoom.toLowerCase())) {
-        await socket.join(targetRoom.toLowerCase());
-      }
+        const timestamp =
+          (typeof data === 'object' && data?.timestamp) || Date.now();
 
-      // Broadcast to everyone ELSE in the same room (room-scoped, no sender echo)
-      socket.to(targetRoom).emit('reaction', payload);
-      socket.to(targetRoom).emit('meeting:reaction', payload);
+        const payload = {
+          roomId: targetRoom,
+          participantId: senderSocketId || participantId,
+          socketId: senderSocketId,
+          senderName,
+          reaction,
+          reactionId,
+          timestamp,
+          // Backward compatibility aliases
+          id: reactionId,
+          emoji: reaction,
+          userId: (typeof data === 'object' && data?.userId) || (socket.data.peerInfo as PeerInfo)?.userId,
+        };
 
-      if (targetRoom.toLowerCase() !== targetRoom) {
-        socket.to(targetRoom.toLowerCase()).emit('reaction', payload);
-        socket.to(targetRoom.toLowerCase()).emit('meeting:reaction', payload);
-      }
+        // Ensure socket is in targetRoom so socket membership is always guaranteed
+        if (!socket.rooms.has(targetRoom)) {
+          await socket.join(targetRoom);
+        }
+        if (targetRoom.toLowerCase() !== targetRoom && !socket.rooms.has(targetRoom.toLowerCase())) {
+          await socket.join(targetRoom.toLowerCase());
+        }
 
-      // If socket joined under a different roomId alias, broadcast to it as well
-      if (socket.data.roomId && socket.data.roomId !== targetRoom && socket.data.roomId !== targetRoom.toLowerCase()) {
-        socket.to(socket.data.roomId).emit('reaction', payload);
-        socket.to(socket.data.roomId).emit('meeting:reaction', payload);
+        // Broadcast ONLY to sockets currently joined to the SAME roomId (no sender echo)
+        socket.to(targetRoom).emit('meeting:reaction', payload);
+
+        if (targetRoom.toLowerCase() !== targetRoom) {
+          socket.to(targetRoom.toLowerCase()).emit('meeting:reaction', payload);
+        }
+
+        if (socket.data.roomId && socket.data.roomId !== targetRoom && socket.data.roomId !== targetRoom.toLowerCase()) {
+          socket.to(socket.data.roomId).emit('meeting:reaction', payload);
+        }
+      } catch (err: any) {
+        console.error('[Socket] meeting:reaction broadcast error:', err);
       }
     };
 
-    socket.on('reaction', handleMeetingReaction);
     socket.on('meeting:reaction', handleMeetingReaction);
+    socket.on('reaction', handleMeetingReaction);
     socket.on('send-reaction', handleMeetingReaction);
 
     // In-meeting Chat

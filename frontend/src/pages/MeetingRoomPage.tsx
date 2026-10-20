@@ -60,16 +60,21 @@ export const MeetingRoomPage: React.FC = () => {
   const [participantReactions, setParticipantReactions] = useState<{ [id: string]: string }>({});
   const peersRef = useRef<PeerState[]>([]);
   const seenReactionIds = useRef<Set<string>>(new Set());
+  const reactionTimeoutsRef = useRef<{ [id: string]: ReturnType<typeof setTimeout> }>({});
 
   const showParticipantReaction = useCallback((participantId: string, reactionEmoji: string) => {
     if (!participantId) return;
+
+    if (reactionTimeoutsRef.current[participantId]) {
+      clearTimeout(reactionTimeoutsRef.current[participantId]);
+    }
 
     setParticipantReactions((prev) => ({
       ...prev,
       [participantId]: reactionEmoji,
     }));
 
-    setTimeout(() => {
+    reactionTimeoutsRef.current[participantId] = setTimeout(() => {
       setParticipantReactions((prev) => {
         if (prev[participantId] === reactionEmoji) {
           const next = { ...prev };
@@ -78,6 +83,7 @@ export const MeetingRoomPage: React.FC = () => {
         }
         return prev;
       });
+      delete reactionTimeoutsRef.current[participantId];
     }, 2800);
   }, []);
 
@@ -106,12 +112,16 @@ export const MeetingRoomPage: React.FC = () => {
     const handleRemoteReaction = (data: any) => {
       console.info('[Reaction] Received remote reaction in MeetingRoomPage:', data);
 
-      if (typeof data === 'object' && data?.id) {
-        if (seenReactionIds.current.has(data.id)) return;
-        seenReactionIds.current.add(data.id);
+      const reactionId =
+        typeof data === 'object' ? (data?.reactionId || data?.id) : undefined;
+
+      // Ignore event if reactionId was already processed
+      if (reactionId) {
+        if (seenReactionIds.current.has(reactionId)) return;
+        seenReactionIds.current.add(reactionId);
         setTimeout(() => {
-          seenReactionIds.current.delete(data.id);
-        }, 4000);
+          seenReactionIds.current.delete(reactionId);
+        }, 5000);
       }
 
       const reactionEmoji =
@@ -134,7 +144,7 @@ export const MeetingRoomPage: React.FC = () => {
         return;
       }
 
-      // 1. Display reaction badge on the remote participant's video tile
+      // Identify the remote participant using participantId/socketId from existing peers
       const currentPeers = peersRef.current;
       const matchedPeer = currentPeers.find(
         (p) =>
@@ -144,19 +154,16 @@ export const MeetingRoomPage: React.FC = () => {
           (senderName && p.name && p.name.trim().toLowerCase() === senderName.trim().toLowerCase())
       );
 
+      // Display reaction overlay/badge on that participant's VideoTile
       if (matchedPeer) {
         showParticipantReaction(matchedPeer.socketId, reactionEmoji);
         if (matchedPeer.userId) {
           showParticipantReaction(matchedPeer.userId, reactionEmoji);
         }
-        if (matchedPeer.name) {
-          showParticipantReaction(matchedPeer.name, reactionEmoji);
-        }
       } else {
         if (senderSocketId) showParticipantReaction(senderSocketId, reactionEmoji);
         if (senderParticipantId) showParticipantReaction(senderParticipantId, reactionEmoji);
         if (senderUserId) showParticipantReaction(senderUserId, reactionEmoji);
-        if (senderName) showParticipantReaction(senderName, reactionEmoji);
       }
 
       // Guarantee badge displays on the remote participant's tile in 1-on-1 calls
@@ -164,52 +171,53 @@ export const MeetingRoomPage: React.FC = () => {
         showParticipantReaction(currentPeers[0].socketId, reactionEmoji);
       }
 
-      // 2. Also trigger floating reaction overlay on receiver screen
+      // Trigger floating reaction overlay on receiver screen
       addFloatingReaction(reactionEmoji, senderName);
     };
 
-    socket.on('reaction', handleRemoteReaction);
     socket.on('meeting:reaction', handleRemoteReaction);
 
     return () => {
-      socket.off('reaction', handleRemoteReaction);
       socket.off('meeting:reaction', handleRemoteReaction);
     };
   }, [socket, addFloatingReaction, showParticipantReaction]);
 
   const handleSendReaction = useCallback(
     (emoji: string) => {
-      // 1. Immediately show floating reaction and tile reaction for local user
+      if (!emoji) return;
+
+      const reactionId = `react-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+      const timestamp = Date.now();
+
+      // Track reactionId locally so local echo is never reprocessed
+      seenReactionIds.current.add(reactionId);
+      setTimeout(() => {
+        seenReactionIds.current.delete(reactionId);
+      }, 5000);
+
+      // 1. Immediately show reaction locally
       addFloatingReaction(emoji, 'You');
       showParticipantReaction('local', emoji);
       if (socket?.id) {
         showParticipantReaction(socket.id, emoji);
       }
 
-      // 2. Broadcast to other participants in the same meeting room
-      const targetRoomId = (roomId || meeting?.roomId || (meeting as any)?._id || '')?.trim();
-      if (socket && targetRoomId) {
-        console.info('[Reaction] Emitting reaction:', { emoji, targetRoomId, socketId: socket.id, socketConnected: socket.connected });
+      // 2. Emit exactly one "meeting:reaction" event through existing socket
+      const cleanRoomId = (roomId || meeting?.roomId || '').trim();
+      if (socket && cleanRoomId) {
         const payload = {
-          id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          roomId: targetRoomId,
+          roomId: cleanRoomId,
           participantId: socket.id || user?.id || 'local',
           socketId: socket.id,
-          userId: user?.id,
-          reaction: emoji,
-          emoji,
           senderName: participantInfo.name,
+          reaction: emoji,
+          reactionId,
+          timestamp,
         };
-        socket.emit('reaction', payload);
         socket.emit('meeting:reaction', payload);
-      } else {
-        console.warn('[Reaction] Cannot emit reaction: socket or targetRoomId missing', {
-          hasSocket: Boolean(socket),
-          targetRoomId,
-        });
       }
     },
-    [socket, roomId, meeting, participantInfo.name, user?.id, addFloatingReaction, showParticipantReaction]
+    [socket, roomId, meeting?.roomId, participantInfo.name, user?.id, addFloatingReaction, showParticipantReaction]
   );
 
   // Fetch meeting metadata
