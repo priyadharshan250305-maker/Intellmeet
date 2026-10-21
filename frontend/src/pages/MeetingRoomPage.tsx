@@ -23,6 +23,8 @@ import {
   Users,
   Sparkles,
   Share2,
+  Monitor,
+  X,
 } from 'lucide-react';
 
 export const MeetingRoomPage: React.FC = () => {
@@ -47,6 +49,7 @@ export const MeetingRoomPage: React.FC = () => {
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
   const [isMobileReactionPickerOpen, setIsMobileReactionPickerOpen] = useState(false);
+  const [screenShareNotice, setScreenShareNotice] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [pinnedSocketId, setPinnedSocketId] = useState<string | null>(null);
   const [hasConsent, setHasConsent] = useState(false);
@@ -327,20 +330,17 @@ export const MeetingRoomPage: React.FC = () => {
 
   peersRef.current = peers;
 
-  // Safe Screen Share toggle with mobile compatibility check
-  const handleSafeToggleScreenShare = () => {
-    if (
-      !isScreenSharing &&
-      (typeof navigator === 'undefined' ||
-        !navigator.mediaDevices ||
-        typeof navigator.mediaDevices.getDisplayMedia !== 'function')
-    ) {
-      alert(
-        'Screen sharing is not supported by your current browser or mobile device. Please join from a desktop browser (Chrome, Edge, Safari) to share your screen.'
-      );
-      return;
+  // Screen Share toggle with mobile capability detection & graceful error handling
+  const handleToggleScreenShare = async () => {
+    try {
+      const result = await toggleScreenShare();
+      if (!result.success && !result.cancelled && result.error) {
+        setScreenShareNotice(result.error);
+      }
+    } catch (err: any) {
+      console.error('[MeetingRoomPage] Screen share toggle failed:', err);
+      setScreenShareNotice('Unable to initiate screen sharing. Please check browser permissions and try again.');
     }
-    toggleScreenShare();
   };
 
   // Speech Recognition & Live AI Transcription Hook
@@ -665,7 +665,7 @@ export const MeetingRoomPage: React.FC = () => {
         isHost={meeting?.isHost}
         onToggleAudio={toggleAudio}
         onToggleVideo={toggleVideo}
-        onToggleScreenShare={handleSafeToggleScreenShare}
+        onToggleScreenShare={handleToggleScreenShare}
         onToggleRaiseHand={toggleRaiseHand}
         onToggleChat={() => {
           setIsChatOpen((prev) => !prev);
@@ -723,7 +723,7 @@ export const MeetingRoomPage: React.FC = () => {
         onOpenTranscript={() => setIsTranscriptOpen(true)}
         onToggleRaiseHand={toggleRaiseHand}
         onOpenReactions={() => setIsMobileReactionPickerOpen(true)}
-        onToggleScreenShare={handleSafeToggleScreenShare}
+        onToggleScreenShare={handleToggleScreenShare}
         onLeaveMeeting={handleLeaveMeeting}
         onEndMeeting={handleEndMeeting}
       />
@@ -734,6 +734,50 @@ export const MeetingRoomPage: React.FC = () => {
         onClose={() => setIsMobileReactionPickerOpen(false)}
         onSelectReaction={handleSendReaction}
       />
+
+      {/* Screen Sharing Browser Capability Notice Modal */}
+      {screenShareNotice && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200"
+          onClick={() => setScreenShareNotice(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl sm:rounded-3xl border border-slate-800 bg-slate-900 p-5 sm:p-6 text-white shadow-2xl animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-500/20 text-amber-400 shrink-0">
+                  <Monitor className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Screen Sharing Notice</h3>
+                  <p className="text-[11px] text-slate-400">Device & Browser Capability</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setScreenShareNotice(null)}
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed mb-5">
+              {screenShareNotice}
+            </p>
+
+            <button
+              type="button"
+              onClick={() => setScreenShareNotice(null)}
+              className="w-full rounded-xl bg-indigo-600 py-2.5 text-xs font-semibold text-white hover:bg-indigo-500 transition-colors"
+            >
+              Understood
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Participant Notice & AI Transcription Consent Modal */}
       <ConsentModal

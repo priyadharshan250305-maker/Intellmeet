@@ -3,6 +3,20 @@ import { Socket } from 'socket.io-client';
 import { PeerState } from '../types';
 import { meetingService } from '../services';
 
+export const isScreenShareSupported = (): boolean => {
+  return (
+    typeof navigator !== 'undefined' &&
+    Boolean(navigator.mediaDevices) &&
+    typeof navigator.mediaDevices.getDisplayMedia === 'function'
+  );
+};
+
+export interface ScreenShareResult {
+  success: boolean;
+  error?: string;
+  cancelled?: boolean;
+}
+
 interface UseWebRTCOptions {
   socket: Socket | null;
   roomId: string;
@@ -35,6 +49,8 @@ export const useWebRTC = ({
   const pendingIceCandidates = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
   const isAudioMutedRef = useRef(initialMuted);
   const isVideoOffRef = useRef(initialVideoOff);
+  const isScreenSharingRef = useRef(false);
+  const cameraTrackRef = useRef<MediaStreamTrack | null>(null);
   const userRef = useRef(user);
   const iceServersRef = useRef<RTCIceServer[]>([
     { urls: 'stun:stun.l.google.com:19302' },
@@ -55,6 +71,10 @@ export const useWebRTC = ({
     isVideoOffRef.current = initialVideoOff;
     setIsVideoOff(initialVideoOff);
   }, [initialVideoOff]);
+
+  useEffect(() => {
+    isScreenSharingRef.current = isScreenSharing;
+  }, [isScreenSharing]);
 
   // Fetch STUN/TURN configuration
   useEffect(() => {
@@ -225,7 +245,7 @@ export const useWebRTC = ({
           if (track.kind === 'audio') {
             track.enabled = !isAudioMutedRef.current;
           } else if (track.kind === 'video') {
-            track.enabled = !isVideoOffRef.current;
+            track.enabled = isScreenSharingRef.current || !isVideoOffRef.current;
           }
           pc.addTrack(track, currentLocalStream);
           console.info(`[WebRTC] Added local ${track.kind} track (${track.id}) to peer connection ${targetSocketId}`);
@@ -750,54 +770,70 @@ export const useWebRTC = ({
     socket?.emit('toggle-video', { roomId, isVideoOff: nextVideoOff });
   }, [isVideoOff, socket, roomId]);
 
-  // Toggle Screen Sharing
-  const toggleScreenShare = useCallback(async () => {
-    if (!socket) return;
-
-    if (!isScreenSharing) {
-      try {
-        const displayStream = await navigator.mediaDevices.getDisplayMedia({
-          video: true,
-          audio: true,
-        });
-        const screenTrack = displayStream.getVideoTracks()[0];
-        screenTrackRef.current = screenTrack;
-
-        // Replace video track in all peer connections
-        for (const pc of peerConnections.current.values()) {
-          const sender = pc.getSenders().find((s) => s.track?.kind === 'video');
-          if (sender) {
-            await sender.replaceTrack(screenTrack);
-          }
-        }
-
-        screenTrack.onended = () => {
-          stopScreenSharing();
-        };
-
-        setIsScreenSharing(true);
-        socket.emit('toggle-screenshare', { roomId, isSharing: true });
-      } catch (err: any) {
-        console.warn('[WebRTC] Screen share cancelled or rejected:', err);
-      }
-    } else {
-      stopScreenSharing();
-    }
-  }, [isScreenSharing, socket, roomId]);
-
+  // Stop Screen Sharing Helper
   const stopScreenSharing = useCallback(async () => {
     if (screenTrackRef.current) {
+      screenTrackRef.current.onended = null;
       screenTrackRef.current.stop();
       screenTrackRef.current = null;
     }
+    isScreenSharingRef.current = false;
 
-    // Restore camera video track on peer connections
-    const cameraVideoTrack = localStreamRef.current?.getVideoTracks().find((t) => t.readyState === 'live') || null;
-    for (const pc of peerConnections.current.values()) {
-      const sender = pc.getSenders().find((s) => s.track?.kind === 'video');
-      if (sender && cameraVideoTrack) {
-        await sender.replaceTrack(cameraVideoTrack);
+    // Determine camera video track to restore
+    const shouldRestoreCamera = !isVideoOffRef.current;
+    let cameraTrack = cameraTrackRef.current;
+
+    // If camera should be enabled but current track is dead/null, reacquire it
+    if (shouldRestoreCamera && (!cameraTrack || cameraTrack.readyState !== 'live')) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: { facingMode: 'user' },
+        });
+        cameraTrack = stream.getVideoTracks()[0] || null;
+        cameraTrackRef.current = cameraTrack;
+      } catch (camErr) {
+        console.warn('[WebRTC] Could not reacquire camera track after screen share:', camErr);
+        cameraTrack = null;
       }
+    }
+
+    const trackToRestore = shouldRestoreCamera && cameraTrack?.readyState === 'live' ? cameraTrack : null;
+
+    // Replace video sender track on all peer connections
+    for (const [targetSocketId, pc] of peerConnections.current.entries()) {
+      try {
+        const senders = pc.getSenders();
+        let videoSender = senders.find((s) => s.track && s.track.kind === 'video');
+        if (!videoSender) {
+          const videoTransceiver = pc.getTransceivers().find(
+            (t) =>
+              t.sender.track?.kind === 'video' ||
+              t.receiver.track?.kind === 'video'
+          );
+          if (videoTransceiver) {
+            videoSender = videoTransceiver.sender;
+          }
+        }
+        if (videoSender) {
+          await videoSender.replaceTrack(trackToRestore);
+        }
+      } catch (err) {
+        console.warn(`[WebRTC] Failed to restore camera track for peer ${targetSocketId}:`, err);
+      }
+    }
+
+    // Restore localStream for local video tile
+    const liveAudioTracks = localStreamRef.current?.getAudioTracks().filter((t) => t.readyState === 'live') || [];
+    if (trackToRestore) {
+      trackToRestore.enabled = !isVideoOffRef.current;
+      const restoredStream = new MediaStream([...liveAudioTracks, trackToRestore]);
+      localStreamRef.current = restoredStream;
+      setLocalStream(restoredStream);
+    } else {
+      const restoredStream = new MediaStream([...liveAudioTracks]);
+      localStreamRef.current = restoredStream;
+      setLocalStream(restoredStream);
     }
 
     setIsScreenSharing(false);
@@ -805,6 +841,137 @@ export const useWebRTC = ({
       socket.emit('toggle-screenshare', { roomId, isSharing: false });
     }
   }, [socket, roomId]);
+
+  // Toggle Screen Sharing with proper mobile feature detection & fallback
+  const toggleScreenShare = useCallback(async (): Promise<ScreenShareResult> => {
+    if (!socket) return { success: false, error: 'Not connected to meeting server' };
+
+    // If currently sharing, stop it
+    if (isScreenSharingRef.current) {
+      await stopScreenSharing();
+      return { success: true };
+    }
+
+    // 1. Feature Detection: Check if browser provides Screen Capture API
+    if (!isScreenShareSupported()) {
+      const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent);
+      const isIOS = typeof navigator !== 'undefined' && /iphone|ipad|ipod/i.test(navigator.userAgent);
+
+      let errorMsg = 'Screen sharing is not supported by your current browser.';
+      if (isAndroid) {
+        errorMsg = 'Screen sharing is not supported by mobile Chrome on Android because the Android OS does not expose the browser Screen Capture API. To share your screen, please join from a desktop browser (Chrome, Edge, Safari) or iOS Safari (iOS 16.4+).';
+      } else if (isIOS) {
+        errorMsg = 'Screen sharing on iOS requires Safari on iOS 16.4 or later. If you are using another browser or an older iOS version, please open this meeting in Safari or on a desktop browser.';
+      }
+
+      return { success: false, error: errorMsg };
+    }
+
+    // 2. Request Display Media with fallback for iOS Safari
+    try {
+      let displayStream: MediaStream;
+
+      try {
+        // Attempt with audio: true first (supports desktop tab audio)
+        displayStream = await navigator.mediaDevices.getDisplayMedia({
+          video: true,
+          audio: true,
+        });
+      } catch (firstErr: any) {
+        // If user cancelled, return gracefully
+        if (
+          firstErr.name === 'NotAllowedError' ||
+          firstErr.name === 'AbortError' ||
+          firstErr.name === 'SecurityError'
+        ) {
+          console.info('[WebRTC] Screen share was cancelled by user');
+          return { success: false, cancelled: true };
+        }
+
+        // On mobile iOS Safari 16.4+, requesting audio: true throws NotSupportedError.
+        // Fallback transparently to video: true (no audio)
+        displayStream = await navigator.mediaDevices.getDisplayMedia({
+          video: true,
+          audio: false,
+        });
+      }
+
+      const screenTrack = displayStream.getVideoTracks()[0];
+      if (!screenTrack) {
+        displayStream.getTracks().forEach((t) => t.stop());
+        return { success: false, error: 'No video track was returned by screen capture.' };
+      }
+
+      screenTrackRef.current = screenTrack;
+      isScreenSharingRef.current = true;
+
+      // Preserve active camera track so it can be restored when screen sharing ends
+      const currentCameraTrack = localStreamRef.current?.getVideoTracks().find((t) => t.readyState === 'live') || null;
+      if (currentCameraTrack) {
+        cameraTrackRef.current = currentCameraTrack;
+      }
+
+      // Update localStream with screenTrack so the local tile displays the shared screen
+      const liveAudioTracks = localStreamRef.current?.getAudioTracks().filter((t) => t.readyState === 'live') || [];
+      const updatedLocalStream = new MediaStream([...liveAudioTracks, screenTrack]);
+      localStreamRef.current = updatedLocalStream;
+      setLocalStream(updatedLocalStream);
+
+      // Send screen track to all connected peers
+      for (const [targetSocketId, pc] of peerConnections.current.entries()) {
+        try {
+          const senders = pc.getSenders();
+          let videoSender = senders.find((s) => s.track && s.track.kind === 'video');
+
+          if (!videoSender) {
+            const videoTransceiver = pc.getTransceivers().find(
+              (t) =>
+                t.sender.track?.kind === 'video' ||
+                t.receiver.track?.kind === 'video'
+            );
+            if (videoTransceiver) {
+              if (videoTransceiver.direction === 'recvonly') {
+                videoTransceiver.direction = 'sendrecv';
+              }
+              videoSender = videoTransceiver.sender;
+            }
+          }
+
+          if (videoSender) {
+            await videoSender.replaceTrack(screenTrack);
+            console.info(`[WebRTC] Replaced video track with screen track for peer ${targetSocketId}`);
+          } else {
+            pc.addTrack(screenTrack, displayStream);
+            console.info(`[WebRTC] Added screen track to peer connection ${targetSocketId}`);
+          }
+        } catch (pcErr) {
+          console.warn(`[WebRTC] Failed to send screen track to peer ${targetSocketId}:`, pcErr);
+        }
+      }
+
+      // When user clicks browser/system "Stop sharing" or terminates broadcast
+      screenTrack.onended = () => {
+        console.info('[WebRTC] Screen sharing track ended by system/browser');
+        stopScreenSharing();
+      };
+
+      setIsScreenSharing(true);
+      socket.emit('toggle-screenshare', { roomId, isSharing: true });
+      return { success: true };
+    } catch (err: any) {
+      if (
+        err.name === 'NotAllowedError' ||
+        err.name === 'AbortError' ||
+        err.name === 'SecurityError'
+      ) {
+        console.info('[WebRTC] Screen share was cancelled by user:', err.message);
+        return { success: false, cancelled: true };
+      }
+
+      console.error('[WebRTC] Error starting screen share:', err);
+      return { success: false, error: err.message || 'Failed to start screen sharing' };
+    }
+  }, [socket, roomId, stopScreenSharing]);
 
   // Raise / Lower Hand
   const toggleRaiseHand = useCallback(() => {
@@ -827,5 +994,6 @@ export const useWebRTC = ({
     toggleVideo,
     toggleScreenShare,
     toggleRaiseHand,
+    isScreenShareSupported: isScreenShareSupported(),
   };
 };
