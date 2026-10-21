@@ -10,16 +10,19 @@ import { VideoTile } from '../components/VideoTile';
 import { MeetingControls } from '../components/MeetingControls';
 import { ChatDrawer } from '../components/ChatDrawer';
 import { TranscriptionDrawer } from '../components/TranscriptionDrawer';
+import { ParticipantsDrawer } from '../components/ParticipantsDrawer';
+import { AISummaryModal } from '../components/AISummaryModal';
+import { ShareMeetingModal } from '../components/ShareMeetingModal';
+import { MobileMoreMenu } from '../components/MobileMoreMenu';
+import { ReactionPicker } from '../components/ReactionPicker';
 import { ConsentModal } from '../components/ConsentModal';
 import { FloatingReactions, FloatingReaction } from '../components/FloatingReactions';
 import {
   Lock,
   AlertCircle,
   Users,
-  Shield,
   Sparkles,
-  Wifi,
-  PhoneOff,
+  Share2,
 } from 'lucide-react';
 
 export const MeetingRoomPage: React.FC = () => {
@@ -36,9 +39,15 @@ export const MeetingRoomPage: React.FC = () => {
   const [authError, setAuthError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Layout & Drawer states
+  // Layout, Modal & Drawer states
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isTranscriptOpen, setIsTranscriptOpen] = useState(false);
+  const [isParticipantsOpen, setIsParticipantsOpen] = useState(false);
+  const [isSummaryOpen, setIsSummaryOpen] = useState(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
+  const [isMobileReactionPickerOpen, setIsMobileReactionPickerOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [pinnedSocketId, setPinnedSocketId] = useState<string | null>(null);
   const [hasConsent, setHasConsent] = useState(false);
   const [showConsentModal, setShowConsentModal] = useState(false);
@@ -227,6 +236,35 @@ export const MeetingRoomPage: React.FC = () => {
     [socket, roomId, meeting?.roomId, participantInfo.name, user?.id, addFloatingReaction, showParticipantReaction]
   );
 
+  // Quick copy meeting link helper
+  const handleCopyMeetingLink = useCallback(() => {
+    const origin = window.location.origin;
+    const cleanRoomId = (roomId || meeting?.roomId || '').trim();
+    const url = cleanRoomId
+      ? `${origin}/room/${cleanRoomId}`
+      : window.location.href.split('?')[0].split('#')[0];
+
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        });
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = url;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }
+    } catch (err) {
+      console.warn('Copy link failed:', err);
+    }
+  }, [roomId, meeting?.roomId]);
+
   // Fetch meeting metadata
   useEffect(() => {
     if (!roomId) return;
@@ -236,7 +274,6 @@ export const MeetingRoomPage: React.FC = () => {
       .then((res) => {
         if (res.data.success) {
           setMeeting(res.data.meeting);
-          // If not private or host, auto-prompt join or ready
         }
       })
       .catch((err) => {
@@ -290,6 +327,22 @@ export const MeetingRoomPage: React.FC = () => {
 
   peersRef.current = peers;
 
+  // Safe Screen Share toggle with mobile compatibility check
+  const handleSafeToggleScreenShare = () => {
+    if (
+      !isScreenSharing &&
+      (typeof navigator === 'undefined' ||
+        !navigator.mediaDevices ||
+        typeof navigator.mediaDevices.getDisplayMedia !== 'function')
+    ) {
+      alert(
+        'Screen sharing is not supported by your current browser or mobile device. Please join from a desktop browser (Chrome, Edge, Safari) to share your screen.'
+      );
+      return;
+    }
+    toggleScreenShare();
+  };
+
   // Speech Recognition & Live AI Transcription Hook
   const {
     isTranscribing,
@@ -340,13 +393,13 @@ export const MeetingRoomPage: React.FC = () => {
 
   if (!isJoined) {
     return (
-      <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center p-6 bg-slate-950 text-white">
-        <div className="w-full max-w-md rounded-3xl border border-slate-800 bg-slate-900 p-8 shadow-2xl">
+      <div className="flex min-h-[calc(100dvh-4rem)] md:min-h-[calc(100vh-4rem)] items-center justify-center p-4 sm:p-6 bg-slate-950 text-white">
+        <div className="w-full max-w-md rounded-2xl sm:rounded-3xl border border-slate-800 bg-slate-900 p-6 sm:p-8 shadow-2xl">
           <div className="text-center mb-6">
             <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-500/10 px-3 py-1 text-xs font-semibold text-indigo-400 mb-3 border border-indigo-500/20">
               <Sparkles className="h-3.5 w-3.5" /> IntellMeet Room
             </span>
-            <h2 className="text-2xl font-bold tracking-tight text-white">
+            <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-white">
               {meeting?.title || 'Video Conference'}
             </h2>
             <p className="mt-1 text-xs text-slate-400 font-mono tracking-wider">
@@ -415,24 +468,62 @@ export const MeetingRoomPage: React.FC = () => {
   const allParticipantsCount = 1 + peers.length;
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col bg-slate-950 text-white overflow-hidden select-none">
+    <div className="flex h-[calc(100dvh-4rem)] md:h-[calc(100vh-4rem)] flex-col bg-slate-950 text-white overflow-hidden select-none">
       {/* Top Header Bar inside room */}
-      <div className="flex h-14 items-center justify-between border-b border-slate-800 bg-slate-950 px-4">
-        <div className="flex items-center gap-3">
-          <h2 className="text-sm font-bold text-slate-100 truncate max-w-xs sm:max-w-md">
-            {meeting?.title || 'Meeting Session'}
-          </h2>
-          <span className="flex items-center gap-1 rounded-full bg-emerald-500/20 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-300 border border-emerald-500/30">
+      <div className="flex h-14 items-center justify-between border-b border-slate-800 bg-slate-950 px-3 sm:px-4 shrink-0">
+        {/* Left: Meeting Title & WebRTC Status */}
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <div className="flex flex-col min-w-0">
+            <h2 className="text-xs sm:text-sm font-bold text-slate-100 truncate max-w-[130px] xs:max-w-[180px] sm:max-w-xs md:max-w-md">
+              {meeting?.title || 'Meeting Session'}
+            </h2>
+            <span className="text-[10px] font-mono text-slate-400 truncate max-w-[130px] sm:hidden">
+              ID: {roomId}
+            </span>
+          </div>
+
+          <span className="flex items-center gap-1 rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] sm:text-[11px] font-semibold text-emerald-300 border border-emerald-500/30 shrink-0">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span>WebRTC Connected</span>
+            <span className="hidden sm:inline">WebRTC Connected</span>
+            <span className="sm:hidden">Live</span>
           </span>
         </div>
 
-        <div className="flex items-center gap-3">
-          <span className="flex items-center gap-1.5 text-xs text-slate-400">
-            <Users className="h-3.5 w-3.5 text-slate-400" />
-            <span>{allParticipantsCount} in call</span>
-          </span>
+        {/* Right: Quick Actions (Share, AI Summary, Clickable Participants Count) */}
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {/* Quick Share Button */}
+          <button
+            type="button"
+            onClick={() => setIsShareModalOpen(true)}
+            className="flex h-8 items-center gap-1 rounded-lg border border-slate-700 bg-slate-800/80 px-2 sm:px-2.5 text-xs font-medium text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
+            title="Share meeting link"
+          >
+            <Share2 className="h-3.5 w-3.5 text-indigo-400" />
+            <span className="hidden sm:inline">Share</span>
+          </button>
+
+          {/* Quick AI Summary Button on Mobile/Tablet */}
+          <button
+            type="button"
+            onClick={() => setIsSummaryOpen(true)}
+            className="flex h-8 items-center gap-1 rounded-lg border border-purple-500/30 bg-purple-950/30 px-2 sm:px-2.5 text-xs font-semibold text-purple-300 hover:bg-purple-900/50 transition-colors"
+            title="View or generate AI Meeting Summary"
+          >
+            <Sparkles className="h-3.5 w-3.5 text-purple-400" />
+            <span className="hidden sm:inline">AI Summary</span>
+          </button>
+
+          {/* Clickable Participant Count Pill */}
+          <button
+            type="button"
+            onClick={() => setIsParticipantsOpen((prev) => !prev)}
+            className="flex h-8 items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900 px-2 sm:px-2.5 text-xs font-medium text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
+            title="View participants list"
+          >
+            <Users className="h-3.5 w-3.5 text-indigo-400" />
+            <span className="font-semibold">{allParticipantsCount}</span>
+            <span className="hidden md:inline text-slate-400 font-normal">in call</span>
+          </button>
         </div>
       </div>
 
@@ -442,7 +533,7 @@ export const MeetingRoomPage: React.FC = () => {
         <FloatingReactions reactions={reactions} />
 
         {/* Video Tiles Grid Area */}
-        <div className="flex-1 p-3 sm:p-4 overflow-y-auto flex items-center justify-center">
+        <div className="flex-1 p-2 sm:p-4 overflow-y-auto flex items-center justify-center">
           {connectionError && (
             <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 rounded-xl bg-red-950/80 border border-red-500/40 px-4 py-2 text-xs text-red-200 shadow-xl backdrop-blur-md">
               <AlertCircle className="h-4 w-4 shrink-0 text-red-400" />
@@ -452,7 +543,7 @@ export const MeetingRoomPage: React.FC = () => {
 
           {/* Grid Layout adjusts based on participant count */}
           <div
-            className={`w-full h-full grid gap-3 sm:gap-4 items-center justify-center max-w-7xl mx-auto ${
+            className={`w-full h-full grid gap-2 sm:gap-4 items-center justify-center max-w-7xl mx-auto ${
               allParticipantsCount === 1
                 ? 'grid-cols-1 max-w-4xl max-h-[80vh]'
                 : allParticipantsCount === 2
@@ -540,6 +631,22 @@ export const MeetingRoomPage: React.FC = () => {
           onRequestConsent={() => setShowConsentModal(true)}
           onLoadDemoTranscript={loadDemoTranscript}
         />
+
+        {/* Real-time Participants Drawer */}
+        <ParticipantsDrawer
+          isOpen={isParticipantsOpen}
+          onClose={() => setIsParticipantsOpen(false)}
+          currentUser={participantInfo}
+          peers={peers}
+          isLocalMuted={isAudioMuted}
+          isLocalVideoOff={isVideoOff}
+          isLocalHandRaised={isHandRaised}
+          isLocalScreenSharing={isScreenSharing}
+          pinnedSocketId={pinnedSocketId}
+          onTogglePin={(socketId) =>
+            setPinnedSocketId((prev) => (prev === socketId ? null : socketId))
+          }
+        />
       </div>
 
       {/* Bottom Meeting Controls Bar */}
@@ -550,21 +657,82 @@ export const MeetingRoomPage: React.FC = () => {
         isHandRaised={isHandRaised}
         isChatOpen={isChatOpen}
         isTranscriptOpen={isTranscriptOpen}
+        isParticipantsOpen={isParticipantsOpen}
+        isSummaryOpen={isSummaryOpen}
+        participantsCount={allParticipantsCount}
         unreadChatCount={unreadChatCount}
         roomId={roomId || ''}
         isHost={meeting?.isHost}
         onToggleAudio={toggleAudio}
         onToggleVideo={toggleVideo}
-        onToggleScreenShare={toggleScreenShare}
+        onToggleScreenShare={handleSafeToggleScreenShare}
         onToggleRaiseHand={toggleRaiseHand}
         onToggleChat={() => {
           setIsChatOpen((prev) => !prev);
           setUnreadChatCount(0);
         }}
         onToggleTranscript={() => setIsTranscriptOpen((prev) => !prev)}
+        onToggleParticipants={() => setIsParticipantsOpen((prev) => !prev)}
+        onToggleSummary={() => setIsSummaryOpen((prev) => !prev)}
+        onToggleShare={() => setIsShareModalOpen(true)}
+        onOpenMoreMenu={() => setIsMoreMenuOpen(true)}
         onLeaveMeeting={handleLeaveMeeting}
         onEndMeeting={handleEndMeeting}
         onSendReaction={handleSendReaction}
+      />
+
+      {/* AI Meeting Intelligence / Summary Modal */}
+      <AISummaryModal
+        isOpen={isSummaryOpen}
+        onClose={() => setIsSummaryOpen(false)}
+        meetingId={meeting?.id || (meeting as any)?._id}
+        meetingTitle={meeting?.title}
+        onOpenTranscript={() => {
+          setIsTranscriptOpen(true);
+        }}
+      />
+
+      {/* Share Meeting Direct Link Modal */}
+      <ShareMeetingModal
+        isOpen={isShareModalOpen}
+        onClose={() => setIsShareModalOpen(false)}
+        roomId={roomId || ''}
+        meetingTitle={meeting?.title}
+      />
+
+      {/* Mobile Slide-Up More Options Sheet */}
+      <MobileMoreMenu
+        isOpen={isMoreMenuOpen}
+        onClose={() => setIsMoreMenuOpen(false)}
+        roomId={roomId || ''}
+        meetingTitle={meeting?.title}
+        isHost={meeting?.isHost}
+        isHandRaised={isHandRaised}
+        isSharingScreen={isScreenSharing}
+        unreadChatCount={unreadChatCount}
+        participantsCount={allParticipantsCount}
+        copied={copied}
+        onOpenSummary={() => setIsSummaryOpen(true)}
+        onOpenShare={() => setIsShareModalOpen(true)}
+        onCopyLink={handleCopyMeetingLink}
+        onOpenParticipants={() => setIsParticipantsOpen(true)}
+        onOpenChat={() => {
+          setIsChatOpen(true);
+          setUnreadChatCount(0);
+        }}
+        onOpenTranscript={() => setIsTranscriptOpen(true)}
+        onToggleRaiseHand={toggleRaiseHand}
+        onOpenReactions={() => setIsMobileReactionPickerOpen(true)}
+        onToggleScreenShare={handleSafeToggleScreenShare}
+        onLeaveMeeting={handleLeaveMeeting}
+        onEndMeeting={handleEndMeeting}
+      />
+
+      {/* Mobile Reaction Picker Triggered from More Menu */}
+      <ReactionPicker
+        isOpen={isMobileReactionPickerOpen}
+        onClose={() => setIsMobileReactionPickerOpen(false)}
+        onSelectReaction={handleSendReaction}
       />
 
       {/* Participant Notice & AI Transcription Consent Modal */}

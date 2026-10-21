@@ -119,7 +119,7 @@ export const VideoTile: React.FC<VideoTileProps> = ({
         isPinned
           ? 'border-indigo-500 shadow-xl shadow-indigo-500/10'
           : 'border-slate-800 shadow-md'
-      } h-full min-h-[220px] aspect-video w-full`}
+      } h-full min-h-[160px] sm:min-h-[220px] aspect-video w-full`}
     >
       {/* Actual HTML5 Video Element */}
       <video
@@ -158,7 +158,7 @@ export const VideoTile: React.FC<VideoTileProps> = ({
 
       {/* Avatar Fallback when video is off */}
       {!showVideo && (
-        <div className="flex flex-col items-center justify-center p-4 text-center">
+        <div className="flex flex-col items-center justify-center p-3 sm:p-4 text-center">
           <div className="relative">
             <img
               src={
@@ -166,17 +166,17 @@ export const VideoTile: React.FC<VideoTileProps> = ({
                 `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}`
               }
               alt={name}
-              className="h-20 w-20 sm:h-24 sm:w-24 rounded-full border-2 border-slate-700 bg-slate-800 object-cover shadow-lg"
+              className="h-16 w-16 sm:h-24 sm:w-24 rounded-full border-2 border-slate-700 bg-slate-800 object-cover shadow-lg"
             />
             {isMuted && (
-              <span className="absolute bottom-0 right-0 flex h-7 w-7 items-center justify-center rounded-full bg-red-600 text-white shadow-md">
-                <MicOff className="h-3.5 w-3.5" />
+              <span className="absolute bottom-0 right-0 flex h-6 w-6 sm:h-7 sm:w-7 items-center justify-center rounded-full bg-red-600 text-white shadow-md">
+                <MicOff className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
               </span>
             )}
           </div>
-          <span className="mt-3 text-sm font-semibold text-slate-200">{name}</span>
+          <span className="mt-2 sm:mt-3 text-xs sm:text-sm font-semibold text-slate-200 truncate max-w-[140px] sm:max-w-none">{name}</span>
           {isLocal && (
-            <span className="text-[11px] font-medium text-slate-400">(You)</span>
+            <span className="text-[10px] sm:text-[11px] font-medium text-slate-400">(You)</span>
           )}
         </div>
       )}

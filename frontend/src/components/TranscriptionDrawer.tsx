@@ -28,7 +28,7 @@ export const TranscriptionDrawer: React.FC<TranscriptionDrawerProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="flex w-80 sm:w-96 flex-col border-l border-slate-800 bg-slate-900 h-full text-slate-100 z-20 shrink-0">
+    <div className="fixed inset-0 z-40 w-full sm:w-96 md:relative md:inset-auto md:w-80 lg:w-96 flex flex-col border-l border-slate-800 bg-slate-900 h-full text-slate-100 shrink-0 shadow-2xl animate-in slide-in-from-right duration-200">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-slate-800 p-4">
         <div className="flex items-center gap-2">

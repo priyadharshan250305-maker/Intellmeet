@@ -12,18 +12,23 @@ import {
   PhoneOff,
   Copy,
   Check,
+  Users,
+  Sparkles,
   MoreVertical,
 } from 'lucide-react';
 import { ReactionPicker } from './ReactionPicker';
 
-interface MeetingControlsProps {
+export interface MeetingControlsProps {
   isMuted: boolean;
   isVideoOff: boolean;
   isSharingScreen: boolean;
   isHandRaised: boolean;
   isChatOpen: boolean;
   isTranscriptOpen: boolean;
+  isParticipantsOpen?: boolean;
+  isSummaryOpen?: boolean;
   unreadChatCount?: number;
+  participantsCount?: number;
   roomId: string;
   isHost?: boolean;
   onToggleAudio: () => void;
@@ -32,6 +37,10 @@ interface MeetingControlsProps {
   onToggleRaiseHand: () => void;
   onToggleChat: () => void;
   onToggleTranscript: () => void;
+  onToggleParticipants?: () => void;
+  onToggleSummary?: () => void;
+  onToggleShare?: () => void;
+  onOpenMoreMenu?: () => void;
   onLeaveMeeting: () => void;
   onEndMeeting?: () => void;
   onSendReaction?: (emoji: string) => void;
@@ -44,7 +53,10 @@ export const MeetingControls: React.FC<MeetingControlsProps> = ({
   isHandRaised,
   isChatOpen,
   isTranscriptOpen,
+  isParticipantsOpen = false,
+  isSummaryOpen = false,
   unreadChatCount = 0,
+  participantsCount = 1,
   roomId,
   isHost = false,
   onToggleAudio,
@@ -53,6 +65,10 @@ export const MeetingControls: React.FC<MeetingControlsProps> = ({
   onToggleRaiseHand,
   onToggleChat,
   onToggleTranscript,
+  onToggleParticipants,
+  onToggleSummary,
+  onToggleShare,
+  onOpenMoreMenu,
   onLeaveMeeting,
   onEndMeeting,
   onSendReaction,
@@ -72,12 +88,16 @@ export const MeetingControls: React.FC<MeetingControlsProps> = ({
   };
 
   return (
-    <div className="flex w-full items-center justify-between border-t border-slate-800 bg-slate-950/95 px-4 py-3 backdrop-blur-md">
-      {/* Left: Meeting Room Info & Quick Copy */}
-      <div className="hidden sm:flex items-center gap-3">
+    <div className="flex w-full items-center justify-between border-t border-slate-800 bg-slate-950/95 px-3 py-2.5 sm:px-4 sm:py-3 backdrop-blur-md relative z-30">
+      {/* =========================================
+          DESKTOP LAYOUT (md:flex)
+          ========================================= */}
+
+      {/* Desktop Left: Meeting Info, Copy Link, Share Modal Button */}
+      <div className="hidden md:flex items-center gap-2.5">
         <div className="flex flex-col">
-          <span className="text-xs text-slate-400">Meeting Room</span>
-          <span className="text-sm font-semibold tracking-wide text-slate-200">{roomId}</span>
+          <span className="text-[10px] text-slate-400 font-medium">Meeting Room</span>
+          <span className="text-xs font-semibold tracking-wide text-slate-200 font-mono">{roomId}</span>
         </div>
         <button
           onClick={copyMeetingLink}
@@ -85,13 +105,23 @@ export const MeetingControls: React.FC<MeetingControlsProps> = ({
           title="Copy meeting link to clipboard"
         >
           {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
-          <span>{copied ? 'Copied' : 'Copy Link'}</span>
+          <span>{copied ? 'Copied' : 'Copy'}</span>
         </button>
+        {onToggleShare && (
+          <button
+            onClick={onToggleShare}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/80 px-2.5 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
+            title="Share meeting with guests"
+          >
+            <Share2 className="h-3.5 w-3.5 text-indigo-400" />
+            <span>Share</span>
+          </button>
+        )}
       </div>
 
-      {/* Center: Core Audio, Video & Share Controls */}
-      <div className="flex items-center gap-2 sm:gap-3 mx-auto sm:mx-0">
-        {/* Microphone Toggle */}
+      {/* Desktop Center: Mic, Camera, ScreenShare, Hand, Reaction, Leave, End Call */}
+      <div className="hidden md:flex items-center gap-2.5">
+        {/* Mic Toggle */}
         <button
           onClick={onToggleAudio}
           className={`flex h-11 w-11 items-center justify-center rounded-xl transition-all shadow-md ${
@@ -104,7 +134,7 @@ export const MeetingControls: React.FC<MeetingControlsProps> = ({
           {isMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
         </button>
 
-        {/* Camera Toggle */}
+        {/* Video Toggle */}
         <button
           onClick={onToggleVideo}
           className={`flex h-11 w-11 items-center justify-center rounded-xl transition-all shadow-md ${
@@ -143,7 +173,7 @@ export const MeetingControls: React.FC<MeetingControlsProps> = ({
           <Hand className="h-5 w-5" />
         </button>
 
-        {/* Reaction Emoji Button & Picker */}
+        {/* Reaction Emoji Picker */}
         {onSendReaction && (
           <div className="relative">
             <button
@@ -167,14 +197,14 @@ export const MeetingControls: React.FC<MeetingControlsProps> = ({
           </div>
         )}
 
-        {/* Leave Meeting (Red button) */}
+        {/* Leave Meeting */}
         <button
           onClick={onLeaveMeeting}
-          className="flex h-11 items-center gap-2 rounded-xl bg-red-600 px-4 text-sm font-semibold text-white shadow-md shadow-red-600/30 hover:bg-red-500 transition-all ml-2"
+          className="flex h-11 items-center gap-2 rounded-xl bg-red-600 px-4 text-sm font-semibold text-white shadow-md shadow-red-600/30 hover:bg-red-500 transition-all ml-1"
           title="Leave meeting"
         >
           <PhoneOff className="h-4 w-4" />
-          <span className="hidden sm:inline">Leave</span>
+          <span>Leave</span>
         </button>
 
         {/* End Meeting for All (Host only) */}
@@ -189,8 +219,24 @@ export const MeetingControls: React.FC<MeetingControlsProps> = ({
         )}
       </div>
 
-      {/* Right: Side Drawers (Chat & AI Transcription) */}
-      <div className="flex items-center gap-2">
+      {/* Desktop Right: Drawers (Participants, Chat, AI Summary, AI Transcript) */}
+      <div className="hidden md:flex items-center gap-2">
+        {/* Participants Drawer Toggle */}
+        {onToggleParticipants && (
+          <button
+            onClick={onToggleParticipants}
+            className={`flex h-10 items-center gap-1.5 rounded-xl px-3 transition-all ${
+              isParticipantsOpen
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
+                : 'bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white'
+            }`}
+            title="Meeting participants"
+          >
+            <Users className="h-4 w-4" />
+            <span className="text-xs font-semibold">{participantsCount}</span>
+          </button>
+        )}
+
         {/* Chat Drawer Toggle */}
         <button
           onClick={onToggleChat}
@@ -209,6 +255,22 @@ export const MeetingControls: React.FC<MeetingControlsProps> = ({
           )}
         </button>
 
+        {/* AI Summary Modal Toggle */}
+        {onToggleSummary && (
+          <button
+            onClick={onToggleSummary}
+            className={`flex h-10 items-center gap-1.5 rounded-xl px-3 transition-all ${
+              isSummaryOpen
+                ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md shadow-indigo-600/20'
+                : 'bg-slate-800 text-indigo-300 hover:bg-slate-700 hover:text-white border border-indigo-500/20'
+            }`}
+            title="AI Meeting Summary & Action Items"
+          >
+            <Sparkles className="h-4 w-4 text-indigo-400" />
+            <span className="text-xs font-semibold">AI Summary</span>
+          </button>
+        )}
+
         {/* Live Transcription Drawer Toggle */}
         <button
           onClick={onToggleTranscript}
@@ -220,7 +282,94 @@ export const MeetingControls: React.FC<MeetingControlsProps> = ({
           title="AI Live Transcription & Insights"
         >
           <FileText className="h-4 w-4" />
-          <span className="hidden md:inline text-xs font-medium">AI Transcript</span>
+          <span className="text-xs font-medium">AI Transcript</span>
+        </button>
+      </div>
+
+      {/* =========================================
+          MOBILE LAYOUT (< md)
+          6 touch-friendly buttons:
+          Mic | Video | Chat | Participants | More | Leave
+          ========================================= */}
+      <div className="flex md:hidden w-full items-center justify-between gap-1">
+        {/* 1. Mic */}
+        <button
+          onClick={onToggleAudio}
+          className={`flex h-12 w-12 items-center justify-center rounded-2xl transition-all shadow-md active:scale-95 ${
+            isMuted
+              ? 'bg-red-600 text-white shadow-red-600/30'
+              : 'bg-slate-800 text-slate-200 active:bg-slate-700'
+          }`}
+          title={isMuted ? 'Unmute microphone' : 'Mute microphone'}
+        >
+          {isMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+        </button>
+
+        {/* 2. Video */}
+        <button
+          onClick={onToggleVideo}
+          className={`flex h-12 w-12 items-center justify-center rounded-2xl transition-all shadow-md active:scale-95 ${
+            isVideoOff
+              ? 'bg-red-600 text-white shadow-red-600/30'
+              : 'bg-slate-800 text-slate-200 active:bg-slate-700'
+          }`}
+          title={isVideoOff ? 'Turn camera on' : 'Turn camera off'}
+        >
+          {isVideoOff ? <VideoOff className="h-5 w-5" /> : <Video className="h-5 w-5" />}
+        </button>
+
+        {/* 3. Chat */}
+        <button
+          onClick={onToggleChat}
+          className={`relative flex h-12 w-12 items-center justify-center rounded-2xl transition-all shadow-md active:scale-95 ${
+            isChatOpen
+              ? 'bg-indigo-600 text-white shadow-indigo-600/30'
+              : 'bg-slate-800 text-slate-200 active:bg-slate-700'
+          }`}
+          title="Meeting chat"
+        >
+          <MessageSquare className="h-5 w-5" />
+          {unreadChatCount > 0 && !isChatOpen && (
+            <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-indigo-500 text-[10px] font-bold text-white ring-2 ring-slate-950">
+              {unreadChatCount}
+            </span>
+          )}
+        </button>
+
+        {/* 4. Participants */}
+        {onToggleParticipants && (
+          <button
+            onClick={onToggleParticipants}
+            className={`relative flex h-12 w-12 items-center justify-center rounded-2xl transition-all shadow-md active:scale-95 ${
+              isParticipantsOpen
+                ? 'bg-indigo-600 text-white shadow-indigo-600/30'
+                : 'bg-slate-800 text-slate-200 active:bg-slate-700'
+            }`}
+            title="Participants"
+          >
+            <Users className="h-5 w-5" />
+            <span className="absolute -top-1 -right-1 flex h-4 min-w-[16px] px-1 items-center justify-center rounded-full bg-slate-700 text-[10px] font-bold text-indigo-300 ring-2 ring-slate-950">
+              {participantsCount}
+            </span>
+          </button>
+        )}
+
+        {/* 5. More Menu Sheet */}
+        <button
+          onClick={onOpenMoreMenu}
+          className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-800 text-slate-200 active:bg-slate-700 transition-all shadow-md active:scale-95"
+          title="More options (AI Summary, Share, Screen share, Reactions, Hand)"
+        >
+          <MoreVertical className="h-5 w-5" />
+        </button>
+
+        {/* 6. Leave */}
+        <button
+          onClick={onLeaveMeeting}
+          className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-600 text-white shadow-md shadow-red-600/30 active:bg-red-500 active:scale-95 transition-all"
+          title="Leave meeting"
+        >
+          <PhoneOff className="h-5 w-5" />
         </button>
       </div>
     </div>
